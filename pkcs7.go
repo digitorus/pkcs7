@@ -70,9 +70,10 @@ var (
 	OIDEncryptionAlgorithmRSASHA384 = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 12}
 	OIDEncryptionAlgorithmRSASHA512 = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 13}
 
-	OIDEncryptionAlgorithmECDSAP256 = asn1.ObjectIdentifier{1, 2, 840, 10045, 3, 1, 7}
-	OIDEncryptionAlgorithmECDSAP384 = asn1.ObjectIdentifier{1, 3, 132, 0, 34}
-	OIDEncryptionAlgorithmECDSAP521 = asn1.ObjectIdentifier{1, 3, 132, 0, 35}
+	OIDEncryptionAlgorithmECDSAP256   = asn1.ObjectIdentifier{1, 2, 840, 10045, 3, 1, 7}
+	OIDEncryptionAlgorithmECDSAP384   = asn1.ObjectIdentifier{1, 3, 132, 0, 34}
+	OIDEncryptionAlgorithmECDSAP521   = asn1.ObjectIdentifier{1, 3, 132, 0, 35}
+	OIDEncryptionAlgorithmECPUBLICKEY = asn1.ObjectIdentifier{1, 2, 840, 10045, 2, 1}
 
 	OIDEncryptionAlgorithmEDDSA25519 = asn1.ObjectIdentifier{1, 3, 101, 112}
 

@@ -26,12 +26,12 @@ func (p7 *PKCS7) Verify() (err error) {
 // otherwise.
 func (p7 *PKCS7) VerifyWithChain(truststore *x509.CertPool) (err error) {
 	intermediates := x509.NewCertPool()
-	for _, cert := range(p7.Certificates) {
+	for _, cert := range p7.Certificates {
 		intermediates.AddCert(cert)
 	}
 
 	opts := x509.VerifyOptions{
-		Roots: truststore,
+		Roots:         truststore,
 		Intermediates: intermediates,
 	}
 
@@ -46,14 +46,14 @@ func (p7 *PKCS7) VerifyWithChain(truststore *x509.CertPool) (err error) {
 // attribute.
 func (p7 *PKCS7) VerifyWithChainAtTime(truststore *x509.CertPool, currentTime time.Time) (err error) {
 	intermediates := x509.NewCertPool()
-	for _, cert := range(p7.Certificates) {
+	for _, cert := range p7.Certificates {
 		intermediates.AddCert(cert)
 	}
 
 	opts := x509.VerifyOptions{
-		Roots: truststore,
+		Roots:         truststore,
 		Intermediates: intermediates,
-		CurrentTime: currentTime,
+		CurrentTime:   currentTime,
 	}
 
 	return p7.VerifyWithOpts(opts)
@@ -62,7 +62,7 @@ func (p7 *PKCS7) VerifyWithChainAtTime(truststore *x509.CertPool, currentTime ti
 // VerifyWithOpts checks the signatures of a PKCS7 object.
 //
 // It accepts x509.VerifyOptions as a parameter.
-// This struct contains a root certificate pool, an intermedate certificate pool, 
+// This struct contains a root certificate pool, an intermedate certificate pool,
 // an optional list of EKUs, and an optional time that certificates should be
 // checked as being valid during.
 
@@ -297,6 +297,20 @@ func getSignatureAlgorithm(digestEncryption, digest pkix.AlgorithmIdentifier) (x
 		return x509.ECDSAWithSHA384, nil
 	case digestEncryption.Algorithm.Equal(OIDDigestAlgorithmECDSASHA512):
 		return x509.ECDSAWithSHA512, nil
+	case digestEncryption.Algorithm.Equal(OIDEncryptionAlgorithmECPUBLICKEY):
+		switch {
+		case digest.Algorithm.Equal(OIDDigestAlgorithmSHA1):
+			return x509.ECDSAWithSHA1, nil
+		case digest.Algorithm.Equal(OIDDigestAlgorithmSHA256):
+			return x509.ECDSAWithSHA256, nil
+		case digest.Algorithm.Equal(OIDDigestAlgorithmSHA384):
+			return x509.ECDSAWithSHA384, nil
+		case digest.Algorithm.Equal(OIDDigestAlgorithmSHA512):
+			return x509.ECDSAWithSHA512, nil
+		default:
+			return -1, fmt.Errorf("pkcs7: unsupported digest %q for encryption algorithm %q",
+				digest.Algorithm.String(), digestEncryption.Algorithm.String())
+		}
 	case digestEncryption.Algorithm.Equal(OIDEncryptionAlgorithmRSA),
 		digestEncryption.Algorithm.Equal(OIDEncryptionAlgorithmRSASHA1),
 		digestEncryption.Algorithm.Equal(OIDEncryptionAlgorithmRSASHA256),
