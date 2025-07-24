@@ -1,4 +1,4 @@
-all: vet staticcheck test
+all: vet test
 
 test:
 	GODEBUG=x509sha1=1 go test -covermode=count -coverprofile=coverage.out .
@@ -10,7 +10,7 @@ vet:
 	go vet .
 
 staticcheck:
-	staticcheck .
+	$(shell go env GOPATH)/bin/staticcheck .
 
 gettools:
 	go install honnef.co/go/tools/cmd/staticcheck@latest
