@@ -9,12 +9,8 @@ showcoverage: test
 vet:
 	go vet .
 
-lint:
-	golint .
-
 staticcheck:
 	staticcheck .
 
 gettools:
-	go get -u honnef.co/go/tools/...
-	go get -u golang.org/x/lint/golint
+	go install honnef.co/go/tools/cmd/staticcheck@latest

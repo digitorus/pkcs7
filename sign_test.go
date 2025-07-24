@@ -8,7 +8,6 @@ import (
 	"encoding/asn1"
 	"encoding/pem"
 	"fmt"
-	"io/ioutil"
 	"math/big"
 	"os"
 	"os/exec"
@@ -92,11 +91,11 @@ func TestSign(t *testing.T) {
 func TestDSASignAndVerifyWithOpenSSL(t *testing.T) {
 	content := []byte("Hello World")
 	// write the content to a temp file
-	tmpContentFile, err := ioutil.TempFile("", "TestDSASignAndVerifyWithOpenSSL_content")
+	tmpContentFile, err := os.CreateTemp("", "TestDSASignAndVerifyWithOpenSSL_content")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ioutil.WriteFile(tmpContentFile.Name(), content, 0755)
+	os.WriteFile(tmpContentFile.Name(), content, 0755)
 
 	block, _ := pem.Decode([]byte(dsaPublicCert))
 	if block == nil {
@@ -108,11 +107,11 @@ func TestDSASignAndVerifyWithOpenSSL(t *testing.T) {
 	}
 
 	// write the signer cert to a temp file
-	tmpSignerCertFile, err := ioutil.TempFile("", "TestDSASignAndVerifyWithOpenSSL_signer")
+	tmpSignerCertFile, err := os.CreateTemp("", "TestDSASignAndVerifyWithOpenSSL_signer")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ioutil.WriteFile(tmpSignerCertFile.Name(), dsaPublicCert, 0755)
+	os.WriteFile(tmpSignerCertFile.Name(), dsaPublicCert, 0755)
 
 	priv := dsa.PrivateKey{
 		PublicKey: dsa.PublicKey{Parameters: dsa.Parameters{P: fromHex("fd7f53811d75122952df4a9c2eece4e7f611b7523cef4400c31e3f80b6512669455d402251fb593d8d58fabfc5f5ba30f6cb9b556cd7813b801d346ff26660b76b9950a5a49f9fe8047b1022c24fbba9d7feb7c61bf83b57e7c6a8a6150f04fb83f6d3c51ec3023554135a169132f675f3ae2b61d72aeff22203199dd14801c7"),
@@ -136,11 +135,11 @@ func TestDSASignAndVerifyWithOpenSSL(t *testing.T) {
 	}
 
 	// write the signature to a temp file
-	tmpSignatureFile, err := ioutil.TempFile("", "TestDSASignAndVerifyWithOpenSSL_signature")
+	tmpSignatureFile, err := os.CreateTemp("", "TestDSASignAndVerifyWithOpenSSL_signature")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ioutil.WriteFile(tmpSignatureFile.Name(), pem.EncodeToMemory(&pem.Block{Type: "PKCS7", Bytes: signed}), 0755)
+	os.WriteFile(tmpSignatureFile.Name(), pem.EncodeToMemory(&pem.Block{Type: "PKCS7", Bytes: signed}), 0755)
 
 	// call openssl to verify the signature on the content using the root
 	opensslCMD := exec.Command("openssl", "smime", "-verify", "-noverify",
@@ -356,7 +355,7 @@ func TestSkipCertificates(t *testing.T) {
 
 // writes the cert to a temporary file and tests that openssl can read it.
 func testOpenSSLParse(t *testing.T, certBytes []byte) {
-	tmpCertFile, err := ioutil.TempFile("", "testCertificate")
+	tmpCertFile, err := os.CreateTemp("", "testCertificate")
 	if err != nil {
 		t.Fatal(err)
 	}
