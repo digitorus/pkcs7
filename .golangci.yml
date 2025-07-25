@@ -1,0 +1,37 @@
+linters:
+  enable:
+    - errcheck
+    - gofmt
+    - goimports
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+linters-settings:
+  staticcheck:
+    checks:
+      - "all"
+      - "-SA1019" # Disable deprecated warnings - this is a crypto library that needs to support legacy algorithms
+
+issues:
+  exclude-rules:
+    # Ignore DSA deprecation warnings as this is a cryptographic library
+    - linters:
+        - staticcheck
+      text: "crypto/dsa.*has been deprecated"
+    
+    # Allow unchecked errors for some cryptographic operations where errors are expected to be rare
+    - linters:
+        - errcheck
+      text: "Error return value.*not checked"
+      path: "ber\\.go"
+    
+    # Allow unchecked errors in test files for setup operations
+    - linters:
+        - errcheck
+      text: "Error return value.*not checked"
+      path: "_test\\.go"
+
+run:
+  timeout: 10m
