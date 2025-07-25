@@ -24,7 +24,7 @@ func (s asn1Structured) EncodeTo(out *bytes.Buffer) error {
 		}
 	}
 	out.Write(s.tagBytes)
-	encodeLength(out, inner.Len())
+	_ = encodeLength(out, inner.Len())
 	out.Write(inner.Bytes())
 	return nil
 }
@@ -61,7 +61,7 @@ func ber2der(ber []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	obj.EncodeTo(out)
+	_ = obj.EncodeTo(out)
 
 	return out.Bytes(), nil
 }

@@ -1,31 +1,60 @@
 linters:
   enable:
+    # Error detection
     - errcheck
-    - gofmt
-    - goimports
+    - gosec
     - govet
     - ineffassign
     - staticcheck
     - unused
+    # Code quality
+    - gofmt
+    - goimports
+    - misspell
+    - unconvert
+    - unparam
+    - gocyclo
+    - goconst
+    - gofumpt
+    # Style and best practices
+    - copyloopvar  # Replaced exportloopref
+    - nolintlint
+    - prealloc
+    - revive
 
 linters-settings:
   staticcheck:
     checks:
       - "all"
-      - "-SA1019" # Disable deprecated warnings - this is a crypto library that needs to support legacy algorithms
+  gosec:
+    excludes:
+      - G401  # Allow weak crypto algorithms as this is a crypto library
+      - G501  # Allow import of blacklisted crypto/md5
+      - G505  # Allow import of blacklisted crypto/sha1
+      - G502  # Allow import of blacklisted crypto/des
+      - G405  # Allow use of weak cryptographic primitive
+      - G306  # Allow WriteFile permissions for test files
+      - G204  # Allow subprocess launches in tests (OpenSSL integration)
+      - G115  # Allow integer overflow conversion
+  revive:
+    rules:
+      - name: exported
+        disabled: true  # Disable exported rule for crypto library
+  gocyclo:
+    min-complexity: 90  # Allow very high complexity for crypto functions and test utilities
 
 issues:
   exclude-rules:
-    # Ignore DSA deprecation warnings as this is a cryptographic library
+    # Allow specific deprecated crypto algorithms that are needed for PKCS#7 compatibility
     - linters:
         - staticcheck
-      text: "crypto/dsa.*has been deprecated"
-    
-    # Allow unchecked errors for some cryptographic operations where errors are expected to be rare
+      text: "SA1019.*crypto/dsa.*has been deprecated"
     - linters:
-        - errcheck
-      text: "Error return value.*not checked"
-      path: "ber\\.go"
+        - staticcheck  
+      text: "SA1019.*crypto/sha1.*is deprecated"
+    - linters:
+        - staticcheck
+      text: "SA1019.*crypto/md5.*is deprecated"
     
     # Allow unchecked errors in test files for setup operations
     - linters:

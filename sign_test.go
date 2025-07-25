@@ -97,7 +97,7 @@ func TestDSASignAndVerifyWithOpenSSL(t *testing.T) {
 	}
 	os.WriteFile(tmpContentFile.Name(), content, 0o755)
 
-	block, _ := pem.Decode([]byte(dsaPublicCert))
+	block, _ := pem.Decode(dsaPublicCert)
 	if block == nil {
 		t.Fatal("failed to parse certificate PEM")
 	}
