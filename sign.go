@@ -361,14 +361,14 @@ func verifyPartialChain(cert *x509.Certificate, parents []*x509.Certificate) err
 	return verifyPartialChain(parents[0], parents[1:])
 }
 
-func cert2issuerAndSerial(cert *x509.Certificate) (issuerAndSerial, error) {
+func cert2issuerAndSerial(cert *x509.Certificate) issuerAndSerial {
 	var ias issuerAndSerial
 	// The issuer RDNSequence has to match exactly the sequence in the certificate
 	// We cannot use cert.Issuer.ToRDNSequence() here since it mangles the sequence
 	ias.IssuerName = asn1.RawValue{FullBytes: cert.RawIssuer}
 	ias.SerialNumber = cert.SerialNumber
 
-	return ias, nil
+	return ias
 }
 
 // signs the DER encoded form of the attributes with the private key

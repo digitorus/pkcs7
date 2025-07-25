@@ -292,10 +292,7 @@ func Encrypt(content []byte, recipients []*x509.Certificate) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		ias, err := cert2issuerAndSerial(recipient)
-		if err != nil {
-			return nil, err
-		}
+		ias := cert2issuerAndSerial(recipient)
 		info := recipientInfo{
 			Version:               0,
 			IssuerAndSerialNumber: ias,

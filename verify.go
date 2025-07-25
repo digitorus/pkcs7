@@ -62,7 +62,7 @@ func (p7 *PKCS7) VerifyWithChainAtTime(truststore *x509.CertPool, currentTime ti
 // VerifyWithOpts checks the signatures of a PKCS7 object.
 //
 // It accepts x509.VerifyOptions as a parameter.
-// This struct contains a root certificate pool, an intermedate certificate pool,
+// This struct contains a root certificate pool, an intermediate certificate pool,
 // an optional list of EKUs, and an optional time that certificates should be
 // checked as being valid during.
 
