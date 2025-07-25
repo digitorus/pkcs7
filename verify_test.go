@@ -26,7 +26,6 @@ func TestVerify(t *testing.T) {
 	expected := []byte("We the People")
 	if !bytes.Equal(p7.Content, expected) {
 		t.Errorf("Signed content does not match.\n\tExpected:%s\n\tActual:%s", expected, p7.Content)
-
 	}
 }
 
@@ -279,13 +278,13 @@ func TestVerifyFirefoxAddon(t *testing.T) {
 	}
 
 	opts := x509.VerifyOptions{
-		Roots: certPool,
+		Roots:       certPool,
 		CurrentTime: mustParseTime("2017-02-23T09:06:16-05:00"),
-		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+		KeyUsages:   []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
 	}
 
 	intermediates := x509.NewCertPool()
-	for _, cert := range(p7.Certificates) {
+	for _, cert := range p7.Certificates {
 		intermediates.AddCert(cert)
 	}
 	opts.Intermediates = intermediates
@@ -468,7 +467,7 @@ but that's not what ships are built for.
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(tmpContentFile.Name(), content, 0755)
+	os.WriteFile(tmpContentFile.Name(), content, 0o755)
 	sigalgs := []x509.SignatureAlgorithm{
 		x509.SHA1WithRSA,
 		x509.SHA256WithRSA,
@@ -495,7 +494,7 @@ but that's not what ships are built for.
 			if err != nil {
 				t.Fatal(err)
 			}
-			fd, err := os.OpenFile(tmpInterCertFile.Name(), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
+			fd, err := os.OpenFile(tmpInterCertFile.Name(), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -512,7 +511,7 @@ but that's not what ships are built for.
 				if err != nil {
 					t.Fatal(err)
 				}
-				fd, err = os.OpenFile(tmpSignerCertFile.Name(), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
+				fd, err = os.OpenFile(tmpSignerCertFile.Name(), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -524,7 +523,7 @@ but that's not what ships are built for.
 				if err != nil {
 					t.Fatal(err)
 				}
-				fd, err = os.OpenFile(tmpSignerKeyFile.Name(), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
+				fd, err = os.OpenFile(tmpSignerKeyFile.Name(), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -582,17 +581,17 @@ but that's not what ships are built for.
 				}
 
 				opts := x509.VerifyOptions{
-					Roots: truststore,
+					Roots:       truststore,
 					CurrentTime: time.Now(),
-					KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+					KeyUsages:   []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
 				}
 
 				intermediates := x509.NewCertPool()
-				for _, cert := range(p7.Certificates) {
+				for _, cert := range p7.Certificates {
 					intermediates.AddCert(cert)
 				}
 				opts.Intermediates = intermediates
-			
+
 				chains, err := ee.Verify(opts)
 				if err != nil {
 					t.Fatal(err)

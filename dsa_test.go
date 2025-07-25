@@ -70,21 +70,21 @@ but that's not what ships are built for.
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(tmpContentFile.Name(), content, 0755)
+	os.WriteFile(tmpContentFile.Name(), content, 0o755)
 
 	// write the signer cert to a temp file
 	tmpSignerCertFile, err := os.CreateTemp("", "TestDSASignWithOpenSSLAndVerify_signer")
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(tmpSignerCertFile.Name(), dsaPublicCert, 0755)
+	os.WriteFile(tmpSignerCertFile.Name(), dsaPublicCert, 0o755)
 
 	// write the signer key to a temp file
 	tmpSignerKeyFile, err := os.CreateTemp("", "TestDSASignWithOpenSSLAndVerify_key")
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(tmpSignerKeyFile.Name(), dsaPrivateKey, 0755)
+	os.WriteFile(tmpSignerKeyFile.Name(), dsaPrivateKey, 0o755)
 
 	tmpSignedFile, err := os.CreateTemp("", "TestDSASignWithOpenSSLAndVerify_signature")
 	if err != nil {
@@ -161,7 +161,7 @@ type DSATestFixture struct {
 func UnmarshalDSATestFixture(testPEMBlock string) DSATestFixture {
 	var result DSATestFixture
 	var derBlock *pem.Block
-	var pemBlock = []byte(testPEMBlock)
+	pemBlock := []byte(testPEMBlock)
 	for {
 		derBlock, pemBlock = pem.Decode(pemBlock)
 		if derBlock == nil {

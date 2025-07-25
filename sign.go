@@ -84,7 +84,9 @@ func marshalAttributes(attrs []attribute) ([]byte, error) {
 
 	// Remove the leading sequence octets
 	var raw asn1.RawValue
-	asn1.Unmarshal(encodedAttributes, &raw)
+	if _, err := asn1.Unmarshal(encodedAttributes, &raw); err != nil {
+		return nil, err
+	}
 	return raw.Bytes, nil
 }
 
@@ -422,7 +424,7 @@ func marshalCertificates(certs []*x509.Certificate) rawCertificates {
 // RawContent, we have to encode it into the RawContent. If its missing,
 // then `asn1.Marshal()` will strip out the certificate wrapper instead.
 func marshalCertificateBytes(certs []byte) (rawCertificates, error) {
-	var val = asn1.RawValue{Bytes: certs, Class: 2, Tag: 0, IsCompound: true}
+	val := asn1.RawValue{Bytes: certs, Class: 2, Tag: 0, IsCompound: true}
 	b, err := asn1.Marshal(val)
 	if err != nil {
 		return rawCertificates{}, err
