@@ -9,30 +9,22 @@ import (
 	"testing"
 )
 
-// isDSASupported checks if DSA signature verification is supported in the current Go version
-func isDSASupported() bool {
-	// Create a minimal certificate to test DSA support
-	cert := &x509.Certificate{}
-	// Try to check a DSA signature - this will fail if DSA is not supported
-	err := cert.CheckSignature(x509.DSAWithSHA1, []byte("test"), []byte("test"))
-	// If the error is "algorithm unimplemented", DSA is not supported
-	// Other errors (like invalid signature) mean DSA is supported but the test data is invalid
-	return err == nil || err.Error() != "x509: cannot verify signature: algorithm unimplemented"
-}
-
 func TestVerifyEC2(t *testing.T) {
-	if !isDSASupported() {
-		t.Skip("Skipping DSA test: DSA signature verification not supported in this Go version")
-	}
-
 	fixture := UnmarshalDSATestFixture(EC2IdentityDocumentFixture)
 	p7, err := Parse(fixture.Input)
 	if err != nil {
 		t.Errorf("Parse encountered unexpected error: %v", err)
 	}
 	p7.Certificates = []*x509.Certificate{fixture.Certificate}
-	if err := p7.Verify(); err != nil {
-		t.Errorf("Verify failed with error: %v", err)
+
+	// DSA signature verification should fail with specific error
+	err = p7.Verify()
+	if err == nil {
+		t.Errorf("Expected DSA verification to fail, but it succeeded")
+	}
+	expectedError := "pkcs7: DSA signature verification is not supported"
+	if err.Error() != expectedError {
+		t.Errorf("Expected error %q, got %q", expectedError, err.Error())
 	}
 }
 
@@ -76,10 +68,6 @@ vSeDCOUMYQR7R9LINYwouHIziqQYMAkGByqGSM44BAMDLwAwLAIUWXBlk40xTwSw
 -----END CERTIFICATE-----`
 
 func TestDSASignWithOpenSSLAndVerify(t *testing.T) {
-	if !isDSASupported() {
-		t.Skip("Skipping DSA test: DSA signature verification not supported in this Go version")
-	}
-
 	content := []byte(`
 A ship in port is safe,
 but that's not what ships are built for.
@@ -133,9 +121,17 @@ but that's not what ships are built for.
 	if err != nil {
 		t.Fatalf("Parse encountered unexpected error: %v", err)
 	}
-	if err := p7.Verify(); err != nil {
-		t.Fatalf("Verify failed with error: %v", err)
+
+	// DSA signature verification should fail with specific error
+	err = p7.Verify()
+	if err == nil {
+		t.Fatalf("Expected DSA verification to fail, but it succeeded")
 	}
+	expectedError := "pkcs7: DSA signature verification is not supported"
+	if err.Error() != expectedError {
+		t.Fatalf("Expected error %q, got %q", expectedError, err.Error())
+	}
+
 	os.Remove(tmpSignerCertFile.Name()) // clean up
 	os.Remove(tmpSignerKeyFile.Name())  // clean up
 	os.Remove(tmpContentFile.Name())    // clean up
