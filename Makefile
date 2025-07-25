@@ -9,8 +9,8 @@ showcoverage: test
 vet:
 	go vet .
 
-staticcheck:
-	$(shell go env GOPATH)/bin/staticcheck .
+golangci-lint:
+	golangci-lint run
 
 gettools:
-	go install honnef.co/go/tools/cmd/staticcheck@latest
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
