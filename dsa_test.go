@@ -9,7 +9,22 @@ import (
 	"testing"
 )
 
+// isDSASupported checks if DSA signature verification is supported in the current Go version
+func isDSASupported() bool {
+	// Create a minimal certificate to test DSA support
+	cert := &x509.Certificate{}
+	// Try to check a DSA signature - this will fail if DSA is not supported
+	err := cert.CheckSignature(x509.DSAWithSHA1, []byte("test"), []byte("test"))
+	// If the error is "algorithm unimplemented", DSA is not supported
+	// Other errors (like invalid signature) mean DSA is supported but the test data is invalid
+	return err == nil || err.Error() != "x509: cannot verify signature: algorithm unimplemented"
+}
+
 func TestVerifyEC2(t *testing.T) {
+	if !isDSASupported() {
+		t.Skip("Skipping DSA test: DSA signature verification not supported in this Go version")
+	}
+
 	fixture := UnmarshalDSATestFixture(EC2IdentityDocumentFixture)
 	p7, err := Parse(fixture.Input)
 	if err != nil {
@@ -61,6 +76,10 @@ vSeDCOUMYQR7R9LINYwouHIziqQYMAkGByqGSM44BAMDLwAwLAIUWXBlk40xTwSw
 -----END CERTIFICATE-----`
 
 func TestDSASignWithOpenSSLAndVerify(t *testing.T) {
+	if !isDSASupported() {
+		t.Skip("Skipping DSA test: DSA signature verification not supported in this Go version")
+	}
+
 	content := []byte(`
 A ship in port is safe,
 but that's not what ships are built for.
