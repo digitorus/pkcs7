@@ -15,17 +15,18 @@ import (
 )
 
 func TestSign(t *testing.T) {
-	content := []byte("Hello World")
-	sigalgs := []x509.SignatureAlgorithm{
-		x509.SHA1WithRSA,
+	testSign(t, []x509.SignatureAlgorithm{
 		x509.SHA256WithRSA,
 		x509.SHA512WithRSA,
-		x509.ECDSAWithSHA1,
 		x509.ECDSAWithSHA256,
 		x509.ECDSAWithSHA384,
 		x509.ECDSAWithSHA512,
 		x509.PureEd25519,
-	}
+	})
+}
+
+func testSign(t *testing.T, sigalgs []x509.SignatureAlgorithm) {
+	content := []byte("Hello World")
 	for _, sigalgroot := range sigalgs {
 		rootCert, err := createTestCertificateByIssuer("PKCS7 Test Root CA", nil, sigalgroot, true)
 		if err != nil {
@@ -95,7 +96,9 @@ func TestDSASignAndVerifyWithOpenSSL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(tmpContentFile.Name(), content, 0o755)
+	if err := os.WriteFile(tmpContentFile.Name(), content, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	block, _ := pem.Decode(dsaPublicCert)
 	if block == nil {
@@ -111,7 +114,9 @@ func TestDSASignAndVerifyWithOpenSSL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(tmpSignerCertFile.Name(), dsaPublicCert, 0o755)
+	if err := os.WriteFile(tmpSignerCertFile.Name(), dsaPublicCert, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	priv := dsa.PrivateKey{
 		PublicKey: dsa.PublicKey{
@@ -141,7 +146,9 @@ func TestDSASignAndVerifyWithOpenSSL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(tmpSignatureFile.Name(), pem.EncodeToMemory(&pem.Block{Type: "PKCS7", Bytes: signed}), 0o755)
+	if err := os.WriteFile(tmpSignatureFile.Name(), pem.EncodeToMemory(&pem.Block{Type: "PKCS7", Bytes: signed}), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	// call openssl to verify the signature on the content using the root
 	opensslCMD := exec.Command("openssl", "smime", "-verify", "-noverify",
@@ -157,17 +164,19 @@ func TestDSASignAndVerifyWithOpenSSL(t *testing.T) {
 }
 
 func TestSignWithoutAttributes(t *testing.T) {
-	content := []byte("Hello World")
-	sigalgs := []x509.SignatureAlgorithm{
-		x509.SHA1WithRSA,
+	testSignWithoutAttributes(t, []x509.SignatureAlgorithm{
 		x509.SHA256WithRSA,
 		x509.SHA512WithRSA,
-		x509.ECDSAWithSHA1,
 		x509.ECDSAWithSHA256,
 		x509.ECDSAWithSHA384,
 		x509.ECDSAWithSHA512,
 		x509.PureEd25519,
-	}
+	})
+}
+
+func testSignWithoutAttributes(t *testing.T, sigalgs []x509.SignatureAlgorithm) {
+	content := []byte("Hello World")
+
 	for _, sigalgroot := range sigalgs {
 		rootCert, err := createTestCertificateByIssuer("PKCS7 Test Root CA", nil, sigalgroot, true)
 		if err != nil {

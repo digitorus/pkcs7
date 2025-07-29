@@ -458,6 +458,16 @@ wNuvFqc=
 // this uses a chain of root, intermediate and signer cert, where the
 // intermediate is added to the certs but the root isn't.
 func TestSignWithOpenSSLAndVerify(t *testing.T) {
+	testSignWithOpenSSLAndVerify(t, []x509.SignatureAlgorithm{
+		x509.SHA256WithRSA,
+		x509.SHA512WithRSA,
+		x509.ECDSAWithSHA256,
+		x509.ECDSAWithSHA384,
+		x509.ECDSAWithSHA512,
+	})
+}
+
+func testSignWithOpenSSLAndVerify(t *testing.T, sigalgs []x509.SignatureAlgorithm) {
 	content := []byte(`
 A ship in port is safe,
 but that's not what ships are built for.
@@ -467,16 +477,10 @@ but that's not what ships are built for.
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(tmpContentFile.Name(), content, 0o755)
-	sigalgs := []x509.SignatureAlgorithm{
-		x509.SHA1WithRSA,
-		x509.SHA256WithRSA,
-		x509.SHA512WithRSA,
-		x509.ECDSAWithSHA1,
-		x509.ECDSAWithSHA256,
-		x509.ECDSAWithSHA384,
-		x509.ECDSAWithSHA512,
+	if err := os.WriteFile(tmpContentFile.Name(), content, 0o755); err != nil {
+		t.Fatal(err)
 	}
+
 	for _, sigalgroot := range sigalgs {
 		rootCert, err := createTestCertificateByIssuer("PKCS7 Test Root CA", nil, sigalgroot, true)
 		if err != nil {
@@ -498,7 +502,11 @@ but that's not what ships are built for.
 			if err != nil {
 				t.Fatal(err)
 			}
-			pem.Encode(fd, &pem.Block{Type: "CERTIFICATE", Bytes: interCert.Certificate.Raw})
+
+			if err := pem.Encode(fd, &pem.Block{Type: "CERTIFICATE", Bytes: interCert.Certificate.Raw}); err != nil {
+				t.Fatal(err)
+			}
+
 			fd.Close()
 			for _, sigalgsigner := range sigalgs {
 				signerCert, err := createTestCertificateByIssuer("PKCS7 Test Signer Cert", interCert, sigalgsigner, false)
@@ -515,7 +523,9 @@ but that's not what ships are built for.
 				if err != nil {
 					t.Fatal(err)
 				}
-				pem.Encode(fd, &pem.Block{Type: "CERTIFICATE", Bytes: signerCert.Certificate.Raw})
+				if err := pem.Encode(fd, &pem.Block{Type: "CERTIFICATE", Bytes: signerCert.Certificate.Raw}); err != nil {
+					t.Fatal(err)
+				}
 				fd.Close()
 
 				// write the signer key to a temp file
@@ -532,13 +542,17 @@ but that's not what ships are built for.
 				switch priv := priv.(type) {
 				case *rsa.PrivateKey:
 					derKey = x509.MarshalPKCS1PrivateKey(priv)
-					pem.Encode(fd, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: derKey})
+					if err := pem.Encode(fd, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: derKey}); err != nil {
+						t.Fatal(err)
+					}
 				case *ecdsa.PrivateKey:
 					derKey, err = x509.MarshalECPrivateKey(priv)
 					if err != nil {
 						t.Fatal(err)
 					}
-					pem.Encode(fd, &pem.Block{Type: "EC PRIVATE KEY", Bytes: derKey})
+					if err := pem.Encode(fd, &pem.Block{Type: "EC PRIVATE KEY", Bytes: derKey}); err != nil {
+						t.Fatal(err)
+					}
 				}
 				fd.Close()
 

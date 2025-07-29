@@ -77,21 +77,27 @@ but that's not what ships are built for.
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(tmpContentFile.Name(), content, 0o755)
+	if err := os.WriteFile(tmpContentFile.Name(), content, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	// write the signer cert to a temp file
 	tmpSignerCertFile, err := os.CreateTemp("", "TestDSASignWithOpenSSLAndVerify_signer")
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(tmpSignerCertFile.Name(), dsaPublicCert, 0o755)
+	if err := os.WriteFile(tmpSignerCertFile.Name(), dsaPublicCert, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	// write the signer key to a temp file
 	tmpSignerKeyFile, err := os.CreateTemp("", "TestDSASignWithOpenSSLAndVerify_key")
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(tmpSignerKeyFile.Name(), dsaPrivateKey, 0o755)
+	if err := os.WriteFile(tmpSignerKeyFile.Name(), dsaPrivateKey, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	tmpSignedFile, err := os.CreateTemp("", "TestDSASignWithOpenSSLAndVerify_signature")
 	if err != nil {
