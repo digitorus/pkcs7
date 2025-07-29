@@ -1,7 +1,7 @@
 all: vet test
 
 test:
-	GODEBUG=x509sha1=1 go test -covermode=count -coverprofile=coverage.out .
+	go test -covermode=count -coverprofile=coverage.out .
 
 showcoverage: test
 	go tool cover -html=coverage.out
