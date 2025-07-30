@@ -40,4 +40,22 @@ jobs:
           go vet .
           go build .
           go test -count=1 -covermode=count -coverprofile=coverage.out .
-          GODEBUG=x509sha1=1 go test -tags=legacy -count=1 -covermode=count -coverprofile=coverage.out .
+
+  legacy-test:
+    name: Legacy Tests
+    strategy:
+      matrix:
+        go: ["1.19", "1.20", "1.21", "1.22", "1.23"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.go }}
+      - name: Test
+        run: |
+          go vet -tags=legacy .
+          go build -tags=legacy .
+          GODEBUG=x509sha1=1 go test -tags=legacy -count=1 -covermode=count -coverprofile=coverage.out . -run "^TestLegacy.*$"
