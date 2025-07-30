@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"testing"
@@ -27,7 +26,6 @@ func TestVerify(t *testing.T) {
 	expected := []byte("We the People")
 	if !bytes.Equal(p7.Content, expected) {
 		t.Errorf("Signed content does not match.\n\tExpected:%s\n\tActual:%s", expected, p7.Content)
-
 	}
 }
 
@@ -280,13 +278,13 @@ func TestVerifyFirefoxAddon(t *testing.T) {
 	}
 
 	opts := x509.VerifyOptions{
-		Roots: certPool,
+		Roots:       certPool,
 		CurrentTime: mustParseTime("2017-02-23T09:06:16-05:00"),
-		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+		KeyUsages:   []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
 	}
 
 	intermediates := x509.NewCertPool()
-	for _, cert := range(p7.Certificates) {
+	for _, cert := range p7.Certificates {
 		intermediates.AddCert(cert)
 	}
 	opts.Intermediates = intermediates
@@ -460,25 +458,29 @@ wNuvFqc=
 // this uses a chain of root, intermediate and signer cert, where the
 // intermediate is added to the certs but the root isn't.
 func TestSignWithOpenSSLAndVerify(t *testing.T) {
+	testSignWithOpenSSLAndVerify(t, []x509.SignatureAlgorithm{
+		x509.SHA256WithRSA,
+		x509.SHA512WithRSA,
+		x509.ECDSAWithSHA256,
+		x509.ECDSAWithSHA384,
+		x509.ECDSAWithSHA512,
+	})
+}
+
+func testSignWithOpenSSLAndVerify(t *testing.T, sigalgs []x509.SignatureAlgorithm) {
 	content := []byte(`
 A ship in port is safe,
 but that's not what ships are built for.
 -- Grace Hopper`)
 	// write the content to a temp file
-	tmpContentFile, err := ioutil.TempFile("", "TestSignWithOpenSSLAndVerify_content")
+	tmpContentFile, err := os.CreateTemp("", "TestSignWithOpenSSLAndVerify_content")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ioutil.WriteFile(tmpContentFile.Name(), content, 0755)
-	sigalgs := []x509.SignatureAlgorithm{
-		x509.SHA1WithRSA,
-		x509.SHA256WithRSA,
-		x509.SHA512WithRSA,
-		x509.ECDSAWithSHA1,
-		x509.ECDSAWithSHA256,
-		x509.ECDSAWithSHA384,
-		x509.ECDSAWithSHA512,
+	if err := os.WriteFile(tmpContentFile.Name(), content, 0o755); err != nil {
+		t.Fatal(err)
 	}
+
 	for _, sigalgroot := range sigalgs {
 		rootCert, err := createTestCertificateByIssuer("PKCS7 Test Root CA", nil, sigalgroot, true)
 		if err != nil {
@@ -492,15 +494,19 @@ but that's not what ships are built for.
 				t.Fatalf("test %s/%s: cannot generate intermediate cert: %s", sigalgroot, sigalginter, err)
 			}
 			// write the intermediate cert to a temp file
-			tmpInterCertFile, err := ioutil.TempFile("", "TestSignWithOpenSSLAndVerify_intermediate")
+			tmpInterCertFile, err := os.CreateTemp("", "TestSignWithOpenSSLAndVerify_intermediate")
 			if err != nil {
 				t.Fatal(err)
 			}
-			fd, err := os.OpenFile(tmpInterCertFile.Name(), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
+			fd, err := os.OpenFile(tmpInterCertFile.Name(), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
 			if err != nil {
 				t.Fatal(err)
 			}
-			pem.Encode(fd, &pem.Block{Type: "CERTIFICATE", Bytes: interCert.Certificate.Raw})
+
+			if err := pem.Encode(fd, &pem.Block{Type: "CERTIFICATE", Bytes: interCert.Certificate.Raw}); err != nil {
+				t.Fatal(err)
+			}
+
 			fd.Close()
 			for _, sigalgsigner := range sigalgs {
 				signerCert, err := createTestCertificateByIssuer("PKCS7 Test Signer Cert", interCert, sigalgsigner, false)
@@ -509,23 +515,25 @@ but that's not what ships are built for.
 				}
 
 				// write the signer cert to a temp file
-				tmpSignerCertFile, err := ioutil.TempFile("", "TestSignWithOpenSSLAndVerify_signer")
+				tmpSignerCertFile, err := os.CreateTemp("", "TestSignWithOpenSSLAndVerify_signer")
 				if err != nil {
 					t.Fatal(err)
 				}
-				fd, err = os.OpenFile(tmpSignerCertFile.Name(), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
+				fd, err = os.OpenFile(tmpSignerCertFile.Name(), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
 				if err != nil {
 					t.Fatal(err)
 				}
-				pem.Encode(fd, &pem.Block{Type: "CERTIFICATE", Bytes: signerCert.Certificate.Raw})
+				if err := pem.Encode(fd, &pem.Block{Type: "CERTIFICATE", Bytes: signerCert.Certificate.Raw}); err != nil {
+					t.Fatal(err)
+				}
 				fd.Close()
 
 				// write the signer key to a temp file
-				tmpSignerKeyFile, err := ioutil.TempFile("", "TestSignWithOpenSSLAndVerify_key")
+				tmpSignerKeyFile, err := os.CreateTemp("", "TestSignWithOpenSSLAndVerify_key")
 				if err != nil {
 					t.Fatal(err)
 				}
-				fd, err = os.OpenFile(tmpSignerKeyFile.Name(), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
+				fd, err = os.OpenFile(tmpSignerKeyFile.Name(), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -534,18 +542,22 @@ but that's not what ships are built for.
 				switch priv := priv.(type) {
 				case *rsa.PrivateKey:
 					derKey = x509.MarshalPKCS1PrivateKey(priv)
-					pem.Encode(fd, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: derKey})
+					if err := pem.Encode(fd, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: derKey}); err != nil {
+						t.Fatal(err)
+					}
 				case *ecdsa.PrivateKey:
 					derKey, err = x509.MarshalECPrivateKey(priv)
 					if err != nil {
 						t.Fatal(err)
 					}
-					pem.Encode(fd, &pem.Block{Type: "EC PRIVATE KEY", Bytes: derKey})
+					if err := pem.Encode(fd, &pem.Block{Type: "EC PRIVATE KEY", Bytes: derKey}); err != nil {
+						t.Fatal(err)
+					}
 				}
 				fd.Close()
 
 				// write the root cert to a temp file
-				tmpSignedFile, err := ioutil.TempFile("", "TestSignWithOpenSSLAndVerify_signature")
+				tmpSignedFile, err := os.CreateTemp("", "TestSignWithOpenSSLAndVerify_signature")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -560,7 +572,7 @@ but that's not what ships are built for.
 				}
 
 				// verify the signed content
-				pemSignature, err := ioutil.ReadFile(tmpSignedFile.Name())
+				pemSignature, err := os.ReadFile(tmpSignedFile.Name())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -583,17 +595,17 @@ but that's not what ships are built for.
 				}
 
 				opts := x509.VerifyOptions{
-					Roots: truststore,
+					Roots:       truststore,
 					CurrentTime: time.Now(),
-					KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+					KeyUsages:   []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
 				}
 
 				intermediates := x509.NewCertPool()
-				for _, cert := range(p7.Certificates) {
+				for _, cert := range p7.Certificates {
 					intermediates.AddCert(cert)
 				}
 				opts.Intermediates = intermediates
-			
+
 				chains, err := ee.Verify(opts)
 				if err != nil {
 					t.Fatal(err)

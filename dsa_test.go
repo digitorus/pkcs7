@@ -1,12 +1,9 @@
-// +build go1.11 go1.12 go1.13 go1.14 go1.15
-
 package pkcs7
 
 import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"testing"
@@ -19,8 +16,15 @@ func TestVerifyEC2(t *testing.T) {
 		t.Errorf("Parse encountered unexpected error: %v", err)
 	}
 	p7.Certificates = []*x509.Certificate{fixture.Certificate}
-	if err := p7.Verify(); err != nil {
-		t.Errorf("Verify failed with error: %v", err)
+
+	// DSA signature verification should fail with specific error
+	err = p7.Verify()
+	if err == nil {
+		t.Errorf("Expected DSA verification to fail, but it succeeded")
+	}
+	expectedError := "pkcs7: DSA signature verification is not supported"
+	if err.Error() != expectedError {
+		t.Errorf("Expected error %q, got %q", expectedError, err.Error())
 	}
 }
 
@@ -69,27 +73,33 @@ A ship in port is safe,
 but that's not what ships are built for.
 -- Grace Hopper`)
 	// write the content to a temp file
-	tmpContentFile, err := ioutil.TempFile("", "TestDSASignWithOpenSSLAndVerify_content")
+	tmpContentFile, err := os.CreateTemp("", "TestDSASignWithOpenSSLAndVerify_content")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ioutil.WriteFile(tmpContentFile.Name(), content, 0755)
+	if err := os.WriteFile(tmpContentFile.Name(), content, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	// write the signer cert to a temp file
-	tmpSignerCertFile, err := ioutil.TempFile("", "TestDSASignWithOpenSSLAndVerify_signer")
+	tmpSignerCertFile, err := os.CreateTemp("", "TestDSASignWithOpenSSLAndVerify_signer")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ioutil.WriteFile(tmpSignerCertFile.Name(), dsaPublicCert, 0755)
+	if err := os.WriteFile(tmpSignerCertFile.Name(), dsaPublicCert, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	// write the signer key to a temp file
-	tmpSignerKeyFile, err := ioutil.TempFile("", "TestDSASignWithOpenSSLAndVerify_key")
+	tmpSignerKeyFile, err := os.CreateTemp("", "TestDSASignWithOpenSSLAndVerify_key")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ioutil.WriteFile(tmpSignerKeyFile.Name(), dsaPrivateKey, 0755)
+	if err := os.WriteFile(tmpSignerKeyFile.Name(), dsaPrivateKey, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
-	tmpSignedFile, err := ioutil.TempFile("", "TestDSASignWithOpenSSLAndVerify_signature")
+	tmpSignedFile, err := os.CreateTemp("", "TestDSASignWithOpenSSLAndVerify_signature")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +114,7 @@ but that's not what ships are built for.
 	}
 
 	// verify the signed content
-	pemSignature, err := ioutil.ReadFile(tmpSignedFile.Name())
+	pemSignature, err := os.ReadFile(tmpSignedFile.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,9 +127,17 @@ but that's not what ships are built for.
 	if err != nil {
 		t.Fatalf("Parse encountered unexpected error: %v", err)
 	}
-	if err := p7.Verify(); err != nil {
-		t.Fatalf("Verify failed with error: %v", err)
+
+	// DSA signature verification should fail with specific error
+	err = p7.Verify()
+	if err == nil {
+		t.Fatalf("Expected DSA verification to fail, but it succeeded")
 	}
+	expectedError := "pkcs7: DSA signature verification is not supported"
+	if err.Error() != expectedError {
+		t.Fatalf("Expected error %q, got %q", expectedError, err.Error())
+	}
+
 	os.Remove(tmpSignerCertFile.Name()) // clean up
 	os.Remove(tmpSignerKeyFile.Name())  // clean up
 	os.Remove(tmpContentFile.Name())    // clean up
@@ -164,7 +182,7 @@ type DSATestFixture struct {
 func UnmarshalDSATestFixture(testPEMBlock string) DSATestFixture {
 	var result DSATestFixture
 	var derBlock *pem.Block
-	var pemBlock = []byte(testPEMBlock)
+	pemBlock := []byte(testPEMBlock)
 	for {
 		derBlock, pemBlock = pem.Decode(pemBlock)
 		if derBlock == nil {

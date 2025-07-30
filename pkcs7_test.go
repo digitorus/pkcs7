@@ -353,7 +353,7 @@ type TestFixture struct {
 func UnmarshalTestFixture(testPEMBlock string) TestFixture {
 	var result TestFixture
 	var derBlock *pem.Block
-	var pemBlock = []byte(testPEMBlock)
+	pemBlock := []byte(testPEMBlock)
 	for {
 		derBlock, pemBlock = pem.Decode(pemBlock)
 		if derBlock == nil {
