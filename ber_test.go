@@ -53,6 +53,11 @@ func TestBer2Der_Negatives(t *testing.T) {
 		{[]byte{0x30, 0x80, 0x1, 0x2}, "BER tag length is more than available data"},
 		{[]byte{0x30, 0x03, 0x01, 0x02}, "length is more than available data"},
 		{[]byte{0x30}, "end of ber data reached"},
+		// GHSA-mq3g-qwhv-4hgw: malformed BER that previously caused out-of-bounds panics.
+		{[]byte{0x1F, 0x80}, "end of ber data reached"},        // high-tag continuation byte is last
+		{[]byte{0x1F, 0x05}, "end of ber data reached"},        // high-tag ends with no length octet
+		{[]byte{0x30, 0x81}, "more than available data"},       // long-form length indicator is last
+		{[]byte{0x30, 0x84, 0x01}, "more than available data"}, // declares 4 length bytes, only 1 present
 	}
 
 	for _, fixture := range fixtures {
@@ -62,6 +67,44 @@ func TestBer2Der_Negatives(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), fixture.ErrorContains) {
 			t.Errorf("Unexpected error thrown.\n\tExpected: /%s/\n\tActual: %s", fixture.ErrorContains, err.Error())
+		}
+	}
+}
+
+func TestParseMalformedBERNoPanic(t *testing.T) {
+	t.Parallel()
+	// GHSA-mq3g-qwhv-4hgw: these tiny malformed inputs used to panic Parse via
+	// out-of-bounds reads in ber2der/readObject. They must now return an error.
+	fixtures := [][]byte{
+		{0x1F, 0x80},
+		{0x1F, 0x05},
+		{0x30, 0x81},
+		{0x30, 0x84, 0x01},
+	}
+	for _, in := range fixtures {
+		if _, err := Parse(in); err == nil {
+			t.Errorf("Parse(% X): expected error, got nil", in)
+		}
+	}
+}
+
+func TestBer2Der_HighTagNumber(t *testing.T) {
+	t.Parallel()
+	// Valid high-tag-number (0x1F prefix) encodings must still round-trip after
+	// the bounds-check tightening in readObject. These inputs are already DER, so
+	// ber2der should return them unchanged.
+	fixtures := [][]byte{
+		{0x1F, 0x05, 0x02, 0x01, 0x07}, // single tag-number octet
+		{0x1F, 0x81, 0x00, 0x01, 0x41}, // multi-byte tag number (128), exercises the continuation loop
+	}
+	for _, in := range fixtures {
+		der, err := ber2der(in)
+		if err != nil {
+			t.Errorf("ber2der(% X) failed: %v", in, err)
+			continue
+		}
+		if !bytes.Equal(der, in) {
+			t.Errorf("ber2der(% X) = % X, want unchanged", in, der)
 		}
 	}
 }
