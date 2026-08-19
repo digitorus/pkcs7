@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+	"time"
 )
 
 func TestSign(t *testing.T) {
@@ -363,19 +364,17 @@ func TestSkipCertificates(t *testing.T) {
 	}
 }
 
-func TestSkipSigningTime(t *testing.T) {
+func signAndParseWithConfig(t *testing.T, config SignerInfoConfig) *PKCS7 {
+	t.Helper()
 	cert, err := createTestCertificate(x509.SHA512WithRSA)
 	if err != nil {
 		t.Fatal(err)
 	}
-	content := []byte("Hello World")
-	toBeSigned, err := NewSignedData(content)
+	toBeSigned, err := NewSignedData([]byte("Hello World"))
 	if err != nil {
 		t.Fatalf("Cannot initialize signed data: %s", err)
 	}
-	if err := toBeSigned.AddSigner(cert.Certificate, *cert.PrivateKey, SignerInfoConfig{
-		SkipSigningTime: true,
-	}); err != nil {
+	if err := toBeSigned.AddSigner(cert.Certificate, *cert.PrivateKey, config); err != nil {
 		t.Fatalf("Cannot add signer: %s", err)
 	}
 	signed, err := toBeSigned.Finish()
@@ -386,13 +385,59 @@ func TestSkipSigningTime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Cannot parse signed data: %v", err)
 	}
-	for _, attr := range p7.Signers[0].AuthenticatedAttributes {
-		if attr.Type.Equal(OIDAttributeSigningTime) {
-			t.Fatal("Got signing-time signed attribute, expected none")
-		}
-	}
 	if err := p7.Verify(); err != nil {
 		t.Fatalf("Cannot verify signed data: %s", err)
+	}
+	return p7
+}
+
+func countSigningTimeAttributes(p7 *PKCS7) int {
+	count := 0
+	for _, attr := range p7.Signers[0].AuthenticatedAttributes {
+		if attr.Type.Equal(OIDAttributeSigningTime) {
+			count++
+		}
+	}
+	return count
+}
+
+func TestSkipSigningTime(t *testing.T) {
+	p7 := signAndParseWithConfig(t, SignerInfoConfig{
+		SkipSigningTime: true,
+	})
+	if n := countSigningTimeAttributes(p7); n != 0 {
+		t.Fatalf("Got %d signing-time signed attribute(s), expected none", n)
+	}
+}
+
+func TestSkipSigningTimeFiltersExtraSignedAttributes(t *testing.T) {
+	p7 := signAndParseWithConfig(t, SignerInfoConfig{
+		SkipSigningTime: true,
+		ExtraSignedAttributes: []Attribute{
+			{Type: OIDAttributeSigningTime, Value: time.Now().UTC()},
+		},
+	})
+	if n := countSigningTimeAttributes(p7); n != 0 {
+		t.Fatalf("Got %d signing-time signed attribute(s), expected none", n)
+	}
+}
+
+func TestExplicitSigningTimeReplacesDefault(t *testing.T) {
+	explicitSigningTime := time.Now().UTC().Truncate(time.Second)
+	p7 := signAndParseWithConfig(t, SignerInfoConfig{
+		ExtraSignedAttributes: []Attribute{
+			{Type: OIDAttributeSigningTime, Value: explicitSigningTime},
+		},
+	})
+	if n := countSigningTimeAttributes(p7); n != 1 {
+		t.Fatalf("Got %d signing-time signed attribute(s), expected exactly one", n)
+	}
+	var signingTime time.Time
+	if err := p7.UnmarshalSignedAttribute(OIDAttributeSigningTime, &signingTime); err != nil {
+		t.Fatalf("Cannot unmarshal signing-time attribute: %s", err)
+	}
+	if !signingTime.Equal(explicitSigningTime) {
+		t.Fatalf("Got signing time %s, expected %s", signingTime, explicitSigningTime)
 	}
 }
 
