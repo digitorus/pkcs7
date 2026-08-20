@@ -46,6 +46,11 @@ func (p7 *PKCS7) Decrypt(cert *x509.Certificate, pkey crypto.PrivateKey) ([]byte
 			if data.Version != 3 {
 				return nil, errors.New("pkcs7: EnvelopedData containing OtherRecipientInfo must use version 3")
 			}
+			contentEncryptionAlgorithm := data.EncryptedContentInfo.ContentEncryptionAlgorithm.Algorithm
+			if !contentEncryptionAlgorithm.Equal(OIDEncryptionAlgorithmAES128CBC) &&
+				!contentEncryptionAlgorithm.Equal(OIDEncryptionAlgorithmAES256CBC) {
+				return nil, errors.New("pkcs7: ML-KEM EnvelopedData requires AES-CBC; AES-GCM requires AuthEnvelopedData")
+			}
 			contentKey, err := decryptKEMRecipientKey(data.RecipientInfos, cert, pkey)
 			if err != nil {
 				return nil, err

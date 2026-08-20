@@ -12,9 +12,19 @@ import java.util.Collections;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.jcajce.JcaCertStore;
 import org.bouncycastle.cms.CMSProcessableByteArray;
+import org.bouncycastle.cms.CMSAlgorithm;
+import org.bouncycastle.cms.CMSEnvelopedData;
+import org.bouncycastle.cms.CMSEnvelopedDataGenerator;
 import org.bouncycastle.cms.CMSSignedData;
 import org.bouncycastle.cms.CMSSignedDataGenerator;
+import org.bouncycastle.cms.KEMRecipientInformation;
+import org.bouncycastle.cms.RecipientInformation;
+import org.bouncycastle.cms.RecipientInformationStore;
 import org.bouncycastle.cms.SignerInformation;
+import org.bouncycastle.cms.jcajce.JceCMSContentEncryptorBuilder;
+import org.bouncycastle.cms.jcajce.JceKEMEnvelopedRecipient;
+import org.bouncycastle.cms.jcajce.JceKEMRecipientId;
+import org.bouncycastle.cms.jcajce.JceKEMRecipientInfoGenerator;
 import org.bouncycastle.cms.jcajce.JcaSignerInfoGeneratorBuilder;
 import org.bouncycastle.cms.jcajce.JcaSimpleSignerInfoVerifierBuilder;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
@@ -48,6 +58,18 @@ public final class BouncyCastleInterop {
                 }
                 verify(Path.of(args[1]), Path.of(args[2]), Boolean.parseBoolean(args[3]));
                 break;
+            case "encrypt":
+                if (args.length != 4) {
+                    throw new IllegalArgumentException("encrypt requires certificate, content, and output");
+                }
+                encrypt(Path.of(args[1]), Path.of(args[2]), Path.of(args[3]));
+                break;
+            case "decrypt":
+                if (args.length != 5) {
+                    throw new IllegalArgumentException("decrypt requires certificate, key, CMS, and output");
+                }
+                decrypt(Path.of(args[1]), Path.of(args[2]), Path.of(args[3]), Path.of(args[4]));
+                break;
             default:
                 throw new IllegalArgumentException("unknown command: " + args[0]);
         }
@@ -56,13 +78,8 @@ public final class BouncyCastleInterop {
     private static void sign(Path certificatePath, Path keyPath, Path contentPath, Path outputPath,
                              boolean detached, boolean direct, String keyAlgorithm,
                              String signatureAlgorithm) throws Exception {
-        CertificateFactory factory = CertificateFactory.getInstance("X.509", PROVIDER);
-        X509Certificate certificate;
-        try (var input = Files.newInputStream(certificatePath)) {
-            certificate = (X509Certificate) factory.generateCertificate(input);
-        }
-        PrivateKey privateKey = KeyFactory.getInstance(keyAlgorithm, PROVIDER).generatePrivate(
-            new PKCS8EncodedKeySpec(Files.readAllBytes(keyPath)));
+        X509Certificate certificate = loadCertificate(certificatePath);
+        PrivateKey privateKey = loadPrivateKey(keyPath, keyAlgorithm);
         byte[] content = Files.readAllBytes(contentPath);
 
         ContentSigner contentSigner = new JcaContentSignerBuilder(signatureAlgorithm)
@@ -111,5 +128,48 @@ public final class BouncyCastleInterop {
                 throw new IllegalStateException("embedded content does not match");
             }
         }
+    }
+
+    private static void encrypt(Path certificatePath, Path contentPath, Path outputPath) throws Exception {
+        X509Certificate certificate = loadCertificate(certificatePath);
+        byte[] content = Files.readAllBytes(contentPath);
+
+        CMSEnvelopedDataGenerator generator = new CMSEnvelopedDataGenerator();
+        generator.addRecipientInfoGenerator(new JceKEMRecipientInfoGenerator(certificate, CMSAlgorithm.AES256_WRAP)
+            .setProvider(PROVIDER)
+            .setKDF(CMSAlgorithm.SHA256_HKDF));
+        CMSEnvelopedData envelopedData = generator.generate(
+            new CMSProcessableByteArray(content),
+            new JceCMSContentEncryptorBuilder(CMSAlgorithm.AES256_CBC).setProvider(PROVIDER).build());
+        Files.write(outputPath, envelopedData.getEncoded());
+    }
+
+    private static void decrypt(Path certificatePath, Path keyPath, Path cmsPath, Path outputPath) throws Exception {
+        X509Certificate certificate = loadCertificate(certificatePath);
+        PrivateKey privateKey = loadPrivateKey(keyPath, "ML-KEM");
+        CMSEnvelopedData envelopedData = new CMSEnvelopedData(Files.readAllBytes(cmsPath));
+        RecipientInformationStore recipients = envelopedData.getRecipientInfos();
+        if (recipients.size() != 1) {
+            throw new IllegalStateException("expected exactly one recipient, got " + recipients.size());
+        }
+        RecipientInformation recipient = recipients.get(new JceKEMRecipientId(certificate));
+        if (!(recipient instanceof KEMRecipientInformation)) {
+            throw new IllegalStateException("expected a matching KEM recipient");
+        }
+        byte[] content = recipient.getContent(
+            new JceKEMEnvelopedRecipient(privateKey).setProvider(PROVIDER));
+        Files.write(outputPath, content);
+    }
+
+    private static X509Certificate loadCertificate(Path certificatePath) throws Exception {
+        CertificateFactory factory = CertificateFactory.getInstance("X.509", PROVIDER);
+        try (var input = Files.newInputStream(certificatePath)) {
+            return (X509Certificate) factory.generateCertificate(input);
+        }
+    }
+
+    private static PrivateKey loadPrivateKey(Path keyPath, String algorithm) throws Exception {
+        return KeyFactory.getInstance(algorithm, PROVIDER).generatePrivate(
+            new PKCS8EncodedKeySpec(Files.readAllBytes(keyPath)));
     }
 }

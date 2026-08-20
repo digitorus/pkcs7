@@ -63,8 +63,9 @@ CI exercises CMS in both directions with OpenSSL 3.6 and 4.0 and Bouncy Castle
 1.85. SignedData coverage includes RSA, ECDSA, Ed25519, and all three ML-DSA
 parameter sets with embedded and detached content, with and without signed
 attributes where the external implementation supports those combinations.
-The OpenSSL matrix also covers RSA key transport EnvelopedData with AES-128-CBC
-and AES-256-CBC content encryption.
+EnvelopedData coverage includes RSA key transport with AES-128-CBC and
+AES-256-CBC against OpenSSL, plus ML-KEM-768 and ML-KEM-1024 KEMRecipientInfo
+with AES-256-CBC against both OpenSSL and Bouncy Castle.
 
 ```go
 package main

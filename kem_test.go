@@ -323,6 +323,38 @@ func TestMLKEMEncryptionRequirements(t *testing.T) {
 			t.Fatalf("Encrypt error = %v", err)
 		}
 	})
+
+	t.Run("decryption requires AES-CBC EnvelopedData", func(t *testing.T) {
+		cert := newMLKEMTestCertificate(t, OIDKeyAlgorithmMLKEM768, publicKey)
+		withContentEncryptionAlgorithm(t, EncryptionAlgorithmAES256CBC)
+		encrypted, err := Encrypt([]byte("content"), []*x509.Certificate{cert})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		tests := []struct {
+			name string
+			oid  asn1.ObjectIdentifier
+		}{
+			{"DES-CBC", OIDEncryptionAlgorithmDESCBC},
+			{"AES-256-GCM", OIDEncryptionAlgorithmAES256GCM},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				parsed, err := Parse(encrypted)
+				if err != nil {
+					t.Fatal(err)
+				}
+				envelope := parsed.raw.(envelopedData)
+				envelope.EncryptedContentInfo.ContentEncryptionAlgorithm.Algorithm = test.oid
+				parsed.raw = envelope
+				_, err = parsed.Decrypt(cert, privateKey)
+				if err == nil || !strings.Contains(err.Error(), "requires AES-CBC") {
+					t.Fatalf("Decrypt error = %v, want AES-CBC requirement", err)
+				}
+			})
+		}
+	})
 }
 
 func TestAESKeyWrapRFC3394(t *testing.T) {
