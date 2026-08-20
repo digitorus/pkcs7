@@ -1,9 +1,46 @@
 # pkcs7
 
-[![GoDoc](https://godoc.org/go.mozilla.org/pkcs7?status.svg)](https://godoc.org/go.mozilla.org/pkcs7)
-[![Build Status](https://github.com/mozilla-services/pkcs7/workflows/CI/badge.svg?branch=master&event=push)](https://github.com/mozilla-services/pkcs7/actions/workflows/ci.yml?query=branch%3Amaster+event%3Apush)
+[![Go Reference](https://pkg.go.dev/badge/github.com/digitorus/pkcs7.svg)](https://pkg.go.dev/github.com/digitorus/pkcs7)
+[![CI](https://github.com/digitorus/pkcs7/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/digitorus/pkcs7/actions/workflows/ci.yml)
 
 pkcs7 implements parsing and creating signed and enveloped messages.
+
+The module requires Go 1.27 or later.
+
+```go
+import "github.com/digitorus/pkcs7"
+```
+
+## Post-quantum cryptography
+
+CMS SignedData supports ML-DSA-44, ML-DSA-65, and ML-DSA-87 using Go's
+`crypto/mldsa` and `crypto/x509` packages. Signing and verification follow
+[RFC 9882](https://www.rfc-editor.org/rfc/rfc9882.html), including pure-mode
+signatures, an empty ML-DSA context, SHA-512 CMS digest identifiers, and absent
+ML-DSA AlgorithmIdentifier parameters.
+
+ML-KEM EnvelopedData is not supported. Correct CMS ML-KEM support requires the
+KEMRecipientInfo architecture defined by
+[RFC 9629](https://www.rfc-editor.org/rfc/rfc9629.html) and used by
+[RFC 9936](https://www.rfc-editor.org/rfc/rfc9936.html); it cannot be added to
+the existing key-transport recipient path. SLH-DSA is standardized for CMS by
+[RFC 9814](https://www.rfc-editor.org/rfc/rfc9814.html), but is not supported
+because Go's standard library does not currently provide an SLH-DSA
+implementation.
+
+Future work includes KEMRecipientInfo and ML-KEM support, CMS signed-attribute
+and EUF-CMA hardening, CMSAlgorithmProtection, SLH-DSA when an appropriate Go
+implementation is available, and composite ML-DSA or ML-KEM only after the
+relevant IETF specifications stabilize.
+
+## Interoperability
+
+CI exercises CMS in both directions with OpenSSL 3.6 and 4.0 and Bouncy Castle
+1.85. SignedData coverage includes RSA, ECDSA, Ed25519, and all three ML-DSA
+parameter sets with embedded and detached content, with and without signed
+attributes where the external implementation supports those combinations.
+The OpenSSL matrix also covers RSA key transport EnvelopedData with AES-128-CBC
+and AES-256-CBC content encryption.
 
 ```go
 package main
@@ -16,16 +53,16 @@ import (
 	"fmt"
 	"os"
 
-    "go.mozilla.org/pkcs7"
+	"github.com/digitorus/pkcs7"
 )
 
 func SignAndDetach(content []byte, cert *x509.Certificate, privkey *rsa.PrivateKey) (signed []byte, err error) {
-	toBeSigned, err := NewSignedData(content)
+	toBeSigned, err := pkcs7.NewSignedData(content)
 	if err != nil {
 		err = fmt.Errorf("Cannot initialize signed data: %s", err)
 		return
 	}
-	if err = toBeSigned.AddSigner(cert, privkey, SignerInfoConfig{}); err != nil {
+	if err = toBeSigned.AddSigner(cert, privkey, pkcs7.SignerInfoConfig{}); err != nil {
 		err = fmt.Errorf("Cannot add signer: %s", err)
 		return
 	}

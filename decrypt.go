@@ -33,6 +33,7 @@ func (p7 *PKCS7) Decrypt(cert *x509.Certificate, pkey crypto.PrivateKey) ([]byte
 	switch pkey := pkey.(type) {
 	case *rsa.PrivateKey:
 		var contentKey []byte
+		//nolint:staticcheck // PKCS #1 v1.5 is required by the existing CMS RSA key-transport format.
 		contentKey, err := rsa.DecryptPKCS1v15(rand.Reader, pkey, recipient.EncryptedKey)
 		if err != nil {
 			return nil, err

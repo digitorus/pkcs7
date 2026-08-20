@@ -4,7 +4,7 @@ test:
 	go test -covermode=count -coverprofile=coverage.out .
 
 test-legacy:
-	GODEBUG=x509sha1=1 go test -tags=legacy -covermode=count -coverprofile=coverage.out .
+	go test -tags=legacy -covermode=count -coverprofile=coverage.out .
 
 showcoverage: test
 	go tool cover -html=coverage.out

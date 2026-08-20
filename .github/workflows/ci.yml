@@ -10,49 +10,124 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8.0.0
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v2.3.0
+          version: v2.13.0
 
   test:
     name: Test
-    strategy:
-      matrix:
-        go: ["1.19", "1.20", "1.21", "1.22", "1.23", "1.24"]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ matrix.go }}
+          go-version-file: go.mod
       - name: Test
         run: |
-          go vet .
-          go build .
-          go test -count=1 -covermode=count -coverprofile=coverage.out .
+          go vet ./...
+          go build ./...
+          go test -count=1 -covermode=count -coverprofile=coverage.out ./...
+
+  openssl-interop:
+    name: OpenSSL ${{ matrix.version }} Interoperability
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: 3.6.3
+            sha256: 243a86649cf6f23eeb6a2ff2456e09e5d77dd9018a54d3d96b0c6bdd6ba6c7f1
+          - version: 4.0.1
+            sha256: 2db3f3a0d6ea4b59e1f094ace2c8cd536dffb87cdc39084c5afa1e6f7f37dd09
+    env:
+      OPENSSL_VERSION: ${{ matrix.version }}
+      OPENSSL_SHA256: ${{ matrix.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Build OpenSSL with PQC CMS support
+        run: |
+          archive="${RUNNER_TEMP}/openssl-${OPENSSL_VERSION}.tar.gz"
+          source_dir="${RUNNER_TEMP}/openssl-${OPENSSL_VERSION}"
+          install_dir="${RUNNER_TEMP}/openssl-install-${OPENSSL_VERSION}"
+          curl --fail --silent --show-error --location \
+            --output "${archive}" \
+            "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
+          echo "${OPENSSL_SHA256}  ${archive}" | sha256sum --check --strict
+          tar --extract --gzip --file "${archive}" --directory "${RUNNER_TEMP}"
+          cd "${source_dir}"
+          ./Configure --prefix="${install_dir}" --openssldir="${install_dir}/ssl" --libdir=lib no-tests
+          make -j2
+          make install_sw
+          make install_ssldirs
+          echo "${install_dir}/bin" >> "${GITHUB_PATH}"
+          echo "LD_LIBRARY_PATH=${install_dir}/lib" >> "${GITHUB_ENV}"
+      - name: Test CMS interoperability
+        env:
+          PKCS7_OPENSSL_INTEROP: "1"
+        run: |
+          openssl version
+          go test -count=1 -run '^TestOpenSSL.*Interoperability$' -v ./...
+
+  bouncycastle-interop:
+    name: Bouncy Castle 1.85 Interoperability
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BOUNCY_CASTLE_VERSION: "1.85"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Download and verify Bouncy Castle
+        run: |
+          bc_dir="${RUNNER_TEMP}/bouncycastle"
+          mkdir -p "${bc_dir}/classes"
+          for artifact in bcprov-jdk18on bcpkix-jdk18on bcutil-jdk18on; do
+            curl --fail --silent --show-error --location \
+              --output "${bc_dir}/${artifact}-${BOUNCY_CASTLE_VERSION}.jar" \
+              "https://repo.maven.apache.org/maven2/org/bouncycastle/${artifact}/${BOUNCY_CASTLE_VERSION}/${artifact}-${BOUNCY_CASTLE_VERSION}.jar"
+          done
+          echo "20af26bf6060bb8005cc2389916812c1e0e998dc48d2ced7131b89461b54cff7  ${bc_dir}/bcprov-jdk18on-${BOUNCY_CASTLE_VERSION}.jar" | sha256sum --check --strict
+          echo "c9f82b2d4e99c4bbdfccf684e52cc06ea06a0b567bfd0d08f9c5a3f417055996  ${bc_dir}/bcpkix-jdk18on-${BOUNCY_CASTLE_VERSION}.jar" | sha256sum --check --strict
+          echo "590f55ed5d68529239898a4a5c4f730b6e37f45d1cfa3fbe51f8485abe32c42d  ${bc_dir}/bcutil-jdk18on-${BOUNCY_CASTLE_VERSION}.jar" | sha256sum --check --strict
+          javac -Xlint:all -Werror -cp "${bc_dir}/*" -d "${bc_dir}/classes" \
+            interop/bouncycastle/BouncyCastleInterop.java
+          echo "PKCS7_BOUNCY_CASTLE_CLASSPATH=${bc_dir}/classes:${bc_dir}/*" >> "${GITHUB_ENV}"
+      - name: Test CMS interoperability
+        env:
+          PKCS7_BOUNCY_CASTLE_INTEROP: "1"
+        run: |
+          java -version
+          go test -count=1 -run '^TestBouncyCastle.*Interoperability$' -v ./...
 
   legacy-test:
     name: Legacy Tests
-    strategy:
-      matrix:
-        go: ["1.19", "1.20", "1.21", "1.22", "1.23"]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ matrix.go }}
+          go-version-file: go.mod
       - name: Test
         run: |
-          go vet -tags=legacy .
-          go build -tags=legacy .
-          GODEBUG=x509sha1=1 go test -tags=legacy -count=1 -covermode=count -coverprofile=coverage.out . -run "^TestLegacy.*$"
+          go vet -tags=legacy ./...
+          go build -tags=legacy ./...
+          go test -tags=legacy -count=1 ./... -run "^TestLegacy.*$"

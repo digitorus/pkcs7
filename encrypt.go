@@ -378,6 +378,7 @@ func marshalEncryptedContent(content []byte) asn1.RawValue {
 
 func encryptKey(key []byte, recipient *x509.Certificate) ([]byte, error) {
 	if pub := recipient.PublicKey.(*rsa.PublicKey); pub != nil {
+		//nolint:staticcheck // PKCS #1 v1.5 is required by the existing CMS RSA key-transport format.
 		return rsa.EncryptPKCS1v15(rand.Reader, pub, key)
 	}
 	return nil, ErrUnsupportedAlgorithm

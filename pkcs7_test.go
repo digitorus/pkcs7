@@ -18,6 +18,11 @@ import (
 
 var test1024Key, test2048Key, test3072Key, test4096Key *rsa.PrivateKey
 
+const (
+	pemTypeCertificate = "CERTIFICATE"
+	pemTypePKCS7       = "PKCS7"
+)
+
 func init() {
 	test1024Key = &rsa.PrivateKey{
 		PublicKey: rsa.PublicKey{
@@ -360,9 +365,9 @@ func UnmarshalTestFixture(testPEMBlock string) TestFixture {
 			break
 		}
 		switch derBlock.Type {
-		case "PKCS7":
+		case pemTypePKCS7:
 			result.Input = derBlock.Bytes
-		case "CERTIFICATE":
+		case pemTypeCertificate:
 			result.Certificate, _ = x509.ParseCertificate(derBlock.Bytes)
 		case "PRIVATE KEY":
 			result.PrivateKey, _ = x509.ParsePKCS1PrivateKey(derBlock.Bytes)

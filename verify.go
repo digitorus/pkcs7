@@ -291,6 +291,12 @@ func (err *MessageDigestMismatchError) Error() string {
 }
 
 func getSignatureAlgorithm(digestEncryption, digest pkix.AlgorithmIdentifier) (x509.SignatureAlgorithm, error) {
+	if algorithm, ok := mlDSAAlgorithmForOID(digestEncryption.Algorithm); ok {
+		if algorithmIdentifierParametersPresent(digestEncryption.Parameters) {
+			return -1, fmt.Errorf("pkcs7: ML-DSA AlgorithmIdentifier parameters must be absent")
+		}
+		return algorithm.signatureAlgorithm, nil
+	}
 	switch {
 	case digestEncryption.Algorithm.Equal(OIDDigestAlgorithmECDSASHA1):
 		return x509.ECDSAWithSHA1, nil
@@ -343,6 +349,11 @@ func getSignatureAlgorithm(digestEncryption, digest pkix.AlgorithmIdentifier) (x
 		return -1, fmt.Errorf("pkcs7: unsupported algorithm %q",
 			digestEncryption.Algorithm.String())
 	}
+}
+
+func algorithmIdentifierParametersPresent(parameters asn1.RawValue) bool {
+	return parameters.Class != 0 || parameters.Tag != 0 || parameters.IsCompound ||
+		len(parameters.Bytes) != 0 || len(parameters.FullBytes) != 0
 }
 
 func getCertFromCertsByIssuerAndSerial(certs []*x509.Certificate, ias issuerAndSerial) *x509.Certificate {
