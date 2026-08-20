@@ -503,7 +503,7 @@ but that's not what ships are built for.
 				t.Fatal(err)
 			}
 
-			if err := pem.Encode(fd, &pem.Block{Type: "CERTIFICATE", Bytes: interCert.Certificate.Raw}); err != nil {
+			if err := pem.Encode(fd, &pem.Block{Type: pemTypeCertificate, Bytes: interCert.Certificate.Raw}); err != nil {
 				t.Fatal(err)
 			}
 
@@ -523,7 +523,7 @@ but that's not what ships are built for.
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := pem.Encode(fd, &pem.Block{Type: "CERTIFICATE", Bytes: signerCert.Certificate.Raw}); err != nil {
+				if err := pem.Encode(fd, &pem.Block{Type: pemTypeCertificate, Bytes: signerCert.Certificate.Raw}); err != nil {
 					t.Fatal(err)
 				}
 				fd.Close()

@@ -39,8 +39,7 @@ func testSign(t *testing.T, sigalgs []x509.SignatureAlgorithm) {
 			if err != nil {
 				t.Fatalf("test %s/%s: cannot generate intermediate cert: %s", sigalgroot, sigalginter, err)
 			}
-			var parents []*x509.Certificate
-			parents = append(parents, interCert.Certificate)
+			parents := []*x509.Certificate{interCert.Certificate}
 			for _, sigalgsigner := range sigalgs {
 				signerCert, err := createTestCertificateByIssuer("PKCS7 Test Signer Cert", interCert, sigalgsigner, false)
 				if err != nil {
@@ -146,7 +145,7 @@ func TestDSASignAndVerifyWithOpenSSL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(tmpSignatureFile.Name(), pem.EncodeToMemory(&pem.Block{Type: "PKCS7", Bytes: signed}), 0o755); err != nil {
+	if err := os.WriteFile(tmpSignatureFile.Name(), pem.EncodeToMemory(&pem.Block{Type: pemTypePKCS7, Bytes: signed}), 0o755); err != nil {
 		t.Fatal(err)
 	}
 

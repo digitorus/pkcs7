@@ -189,9 +189,9 @@ func UnmarshalDSATestFixture(testPEMBlock string) DSATestFixture {
 			break
 		}
 		switch derBlock.Type {
-		case "PKCS7":
+		case pemTypePKCS7:
 			result.Input = derBlock.Bytes
-		case "CERTIFICATE":
+		case pemTypeCertificate:
 			result.Certificate, _ = x509.ParseCertificate(derBlock.Bytes)
 		}
 	}
