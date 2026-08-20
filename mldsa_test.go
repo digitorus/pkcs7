@@ -27,6 +27,11 @@ var mlDSATestCases = []mlDSATestCase{
 	{"ML-DSA-87", mldsa.MLDSA87(), x509.MLDSA87, OIDSignatureAlgorithmMLDSA87},
 }
 
+const (
+	embeddedContentTestName = "embedded"
+	detachedContentTestName = "detached"
+)
+
 func TestMLDSASignAndVerify(t *testing.T) {
 	content := []byte("CMS ML-DSA pure-mode test content")
 
@@ -42,9 +47,9 @@ func TestMLDSASignAndVerify(t *testing.T) {
 					attributeName = "without-signed-attributes"
 				}
 				for _, detached := range []bool{false, true} {
-					contentName := "embedded"
+					contentName := embeddedContentTestName
 					if detached {
-						contentName = "detached"
+						contentName = detachedContentTestName
 					}
 					t.Run(attributeName+"/"+contentName, func(t *testing.T) {
 						signedData, err := NewSignedData(content)
