@@ -72,12 +72,49 @@ jobs:
           make install_ssldirs
           echo "${install_dir}/bin" >> "${GITHUB_PATH}"
           echo "LD_LIBRARY_PATH=${install_dir}/lib" >> "${GITHUB_ENV}"
-      - name: Test PQC CMS interoperability
+      - name: Test CMS interoperability
         env:
           PKCS7_OPENSSL_INTEROP: "1"
         run: |
           openssl version
           go test -count=1 -run '^TestOpenSSL.*Interoperability$' -v ./...
+
+  bouncycastle-interop:
+    name: Bouncy Castle 1.85 Interoperability
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BOUNCY_CASTLE_VERSION: "1.85"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Download and verify Bouncy Castle
+        run: |
+          bc_dir="${RUNNER_TEMP}/bouncycastle"
+          mkdir -p "${bc_dir}/classes"
+          for artifact in bcprov-jdk18on bcpkix-jdk18on bcutil-jdk18on; do
+            curl --fail --silent --show-error --location \
+              --output "${bc_dir}/${artifact}-${BOUNCY_CASTLE_VERSION}.jar" \
+              "https://repo.maven.apache.org/maven2/org/bouncycastle/${artifact}/${BOUNCY_CASTLE_VERSION}/${artifact}-${BOUNCY_CASTLE_VERSION}.jar"
+          done
+          echo "20af26bf6060bb8005cc2389916812c1e0e998dc48d2ced7131b89461b54cff7  ${bc_dir}/bcprov-jdk18on-${BOUNCY_CASTLE_VERSION}.jar" | sha256sum --check --strict
+          echo "c9f82b2d4e99c4bbdfccf684e52cc06ea06a0b567bfd0d08f9c5a3f417055996  ${bc_dir}/bcpkix-jdk18on-${BOUNCY_CASTLE_VERSION}.jar" | sha256sum --check --strict
+          echo "590f55ed5d68529239898a4a5c4f730b6e37f45d1cfa3fbe51f8485abe32c42d  ${bc_dir}/bcutil-jdk18on-${BOUNCY_CASTLE_VERSION}.jar" | sha256sum --check --strict
+          javac -Xlint:all -Werror -cp "${bc_dir}/*" -d "${bc_dir}/classes" \
+            interop/bouncycastle/BouncyCastleInterop.java
+          echo "PKCS7_BOUNCY_CASTLE_CLASSPATH=${bc_dir}/classes:${bc_dir}/*" >> "${GITHUB_ENV}"
+      - name: Test CMS interoperability
+        env:
+          PKCS7_BOUNCY_CASTLE_INTEROP: "1"
+        run: |
+          java -version
+          go test -count=1 -run '^TestBouncyCastle.*Interoperability$' -v ./...
 
   legacy-test:
     name: Legacy Tests

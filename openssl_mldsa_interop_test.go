@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -86,7 +85,7 @@ func goToOpenSSL(t *testing.T, certificate *x509.Certificate, privateKey *mldsa.
 			if err := os.WriteFile(cmsPath, cmsDER, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			args := []string{"cms", "-verify", "-binary", "-inform", "DER", "-in", cmsPath, "-noverify", "-out", outputPath}
+			args := []string{openSSLCMSCommand, "-verify", openSSLBinaryArg, "-inform", openSSLDERFormat, openSSLInArg, cmsPath, "-noverify", openSSLOutArg, outputPath}
 			if test.detached || test.withoutAttr {
 				// OpenSSL 4.0.1's CMS verifier requires an explicit content BIO for
 				// pure ML-DSA signatures, even when eContent is embedded.
@@ -124,8 +123,8 @@ func openSSLToGo(t *testing.T, algorithm mlDSATestCase, certificatePath, keyPath
 			}
 			cmsPath := filepath.Join(dir, "openssl-"+strings.ReplaceAll(test.name, "/", "-")+".der")
 			args := []string{
-				"cms", "-sign", "-binary", "-md", "sha512", "-in", contentPath,
-				"-signer", certificatePath, "-inkey", keyPath, "-outform", "DER", "-out", cmsPath,
+				openSSLCMSCommand, "-sign", openSSLBinaryArg, "-md", "sha512", openSSLInArg, contentPath,
+				"-signer", certificatePath, "-inkey", keyPath, "-outform", openSSLDERFormat, openSSLOutArg, cmsPath,
 			}
 			if !test.detached {
 				args = append(args, "-nodetach")
@@ -156,21 +155,13 @@ func openSSLToGo(t *testing.T, algorithm mlDSATestCase, certificatePath, keyPath
 
 func requireOpenSSLMLDSA(t *testing.T) int {
 	t.Helper()
+	major := openSSLMajorVersion(t)
 	version := runOpenSSLCommand(t, "version")
 	algorithms := runOpenSSLCommand(t, "list", "-signature-algorithms")
 	for _, algorithm := range []string{"ML-DSA-44", "ML-DSA-65", "ML-DSA-87"} {
 		if !strings.Contains(algorithms, algorithm) {
 			t.Fatalf("%s does not provide %s", strings.TrimSpace(version), algorithm)
 		}
-	}
-	fields := strings.Fields(version)
-	if len(fields) < 2 {
-		t.Fatalf("unexpected openssl version output %q", strings.TrimSpace(version))
-	}
-	majorText, _, _ := strings.Cut(fields[1], ".")
-	major, err := strconv.Atoi(majorText)
-	if err != nil {
-		t.Fatalf("parse openssl version %q: %v", fields[1], err)
 	}
 	return major
 }

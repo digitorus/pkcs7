@@ -33,6 +33,15 @@ and EUF-CMA hardening, CMSAlgorithmProtection, SLH-DSA when an appropriate Go
 implementation is available, and composite ML-DSA or ML-KEM only after the
 relevant IETF specifications stabilize.
 
+## Interoperability
+
+CI exercises CMS in both directions with OpenSSL 3.6 and 4.0 and Bouncy Castle
+1.85. SignedData coverage includes RSA, ECDSA, Ed25519, and all three ML-DSA
+parameter sets with embedded and detached content, with and without signed
+attributes where the external implementation supports those combinations.
+The OpenSSL matrix also covers RSA key transport EnvelopedData with AES-128-CBC
+and AES-256-CBC content encryption.
+
 ```go
 package main
 
