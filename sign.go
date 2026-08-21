@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"time"
 )
 
@@ -49,6 +50,11 @@ type SignerInfoConfig struct {
 	ExtraSignedAttributes   []Attribute
 	ExtraUnsignedAttributes []Attribute
 	SkipCertificates        bool
+	// SkipSigningTime omits the signing-time signed attribute, dropping any
+	// signing-time entry found in ExtraSignedAttributes, as required by
+	// ETSI EN 319 142-1. Otherwise, the first explicit signing-time entry
+	// replaces the default and any additional entries are ignored.
+	SkipSigningTime bool
 }
 
 type signedData struct {
@@ -179,8 +185,21 @@ func (sd *SignedData) AddSignerChain(ee *x509.Certificate, keyOrSigner interface
 	attrs := &attributes{}
 	attrs.Add(OIDAttributeContentType, sd.sd.ContentInfo.ContentType)
 	attrs.Add(OIDAttributeMessageDigest, sd.messageDigest)
-	attrs.Add(OIDAttributeSigningTime, time.Now().UTC())
+	hasExplicitSigningTime := slices.ContainsFunc(
+		config.ExtraSignedAttributes,
+		func(attr Attribute) bool { return attr.Type.Equal(OIDAttributeSigningTime) },
+	)
+	if !config.SkipSigningTime && !hasExplicitSigningTime {
+		attrs.Add(OIDAttributeSigningTime, time.Now().UTC())
+	}
+	addedExplicitSigningTime := false
 	for _, attr := range config.ExtraSignedAttributes {
+		if attr.Type.Equal(OIDAttributeSigningTime) {
+			if config.SkipSigningTime || addedExplicitSigningTime {
+				continue
+			}
+			addedExplicitSigningTime = true
+		}
 		attrs.Add(attr.Type, attr.Value)
 	}
 	finalAttrs, err := attrs.ForMarshalling()

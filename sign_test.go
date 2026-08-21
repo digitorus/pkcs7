@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+	"time"
 )
 
 func TestSign(t *testing.T) {
@@ -360,6 +361,120 @@ func TestSkipCertificates(t *testing.T) {
 	}
 	if len(p7.Certificates) > 0 {
 		t.Fatalf("Got %d certificate(s), exected none", len(p7.Certificates))
+	}
+}
+
+func signAndParseWithConfig(t *testing.T, config SignerInfoConfig) *PKCS7 {
+	t.Helper()
+	cert, err := createTestCertificate(x509.SHA512WithRSA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	toBeSigned, err := NewSignedData([]byte("Hello World"))
+	if err != nil {
+		t.Fatalf("Cannot initialize signed data: %s", err)
+	}
+	if err := toBeSigned.AddSigner(cert.Certificate, *cert.PrivateKey, config); err != nil {
+		t.Fatalf("Cannot add signer: %s", err)
+	}
+	signed, err := toBeSigned.Finish()
+	if err != nil {
+		t.Fatalf("Cannot finish signing data: %s", err)
+	}
+	p7, err := Parse(signed)
+	if err != nil {
+		t.Fatalf("Cannot parse signed data: %v", err)
+	}
+	if err := p7.Verify(); err != nil {
+		t.Fatalf("Cannot verify signed data: %s", err)
+	}
+	return p7
+}
+
+func countSigningTimeAttributes(p7 *PKCS7) int {
+	count := 0
+	for _, attr := range p7.Signers[0].AuthenticatedAttributes {
+		if attr.Type.Equal(OIDAttributeSigningTime) {
+			count++
+		}
+	}
+	return count
+}
+
+func TestSkipSigningTime(t *testing.T) {
+	p7 := signAndParseWithConfig(t, SignerInfoConfig{
+		SkipSigningTime: true,
+	})
+	if n := countSigningTimeAttributes(p7); n != 0 {
+		t.Fatalf("Got %d signing-time signed attribute(s), expected none", n)
+	}
+}
+
+func TestSkipSigningTimeFiltersExtraSignedAttributes(t *testing.T) {
+	oidTest := asn1.ObjectIdentifier{2, 3, 4, 5, 6, 7}
+	const testValue = "preserved"
+	p7 := signAndParseWithConfig(t, SignerInfoConfig{
+		SkipSigningTime: true,
+		ExtraSignedAttributes: []Attribute{
+			{Type: OIDAttributeSigningTime, Value: time.Now().UTC()},
+			{Type: oidTest, Value: testValue},
+		},
+	})
+	if n := countSigningTimeAttributes(p7); n != 0 {
+		t.Fatalf("Got %d signing-time signed attribute(s), expected none", n)
+	}
+	var actual string
+	if err := p7.UnmarshalSignedAttribute(oidTest, &actual); err != nil {
+		t.Fatalf("Cannot unmarshal preserved signed attribute: %s", err)
+	}
+	if actual != testValue {
+		t.Fatalf("Got preserved signed attribute %q, expected %q", actual, testValue)
+	}
+}
+
+func TestDefaultSigningTimeIsPreserved(t *testing.T) {
+	p7 := signAndParseWithConfig(t, SignerInfoConfig{})
+	if n := countSigningTimeAttributes(p7); n != 1 {
+		t.Fatalf("Got %d signing-time signed attribute(s), expected exactly one", n)
+	}
+}
+
+func TestExplicitSigningTimeReplacesDefault(t *testing.T) {
+	explicitSigningTime := time.Now().UTC().Truncate(time.Second)
+	p7 := signAndParseWithConfig(t, SignerInfoConfig{
+		ExtraSignedAttributes: []Attribute{
+			{Type: OIDAttributeSigningTime, Value: explicitSigningTime},
+		},
+	})
+	if n := countSigningTimeAttributes(p7); n != 1 {
+		t.Fatalf("Got %d signing-time signed attribute(s), expected exactly one", n)
+	}
+	var signingTime time.Time
+	if err := p7.UnmarshalSignedAttribute(OIDAttributeSigningTime, &signingTime); err != nil {
+		t.Fatalf("Cannot unmarshal signing-time attribute: %s", err)
+	}
+	if !signingTime.Equal(explicitSigningTime) {
+		t.Fatalf("Got signing time %s, expected %s", signingTime, explicitSigningTime)
+	}
+}
+
+func TestMultipleExplicitSigningTimesUseFirst(t *testing.T) {
+	firstSigningTime := time.Now().UTC().Truncate(time.Second)
+	p7 := signAndParseWithConfig(t, SignerInfoConfig{
+		ExtraSignedAttributes: []Attribute{
+			{Type: OIDAttributeSigningTime, Value: firstSigningTime},
+			{Type: OIDAttributeSigningTime, Value: firstSigningTime.Add(time.Hour)},
+		},
+	})
+	if n := countSigningTimeAttributes(p7); n != 1 {
+		t.Fatalf("Got %d signing-time signed attribute(s), expected exactly one", n)
+	}
+	var signingTime time.Time
+	if err := p7.UnmarshalSignedAttribute(OIDAttributeSigningTime, &signingTime); err != nil {
+		t.Fatalf("Cannot unmarshal signing-time attribute: %s", err)
+	}
+	if !signingTime.Equal(firstSigningTime) {
+		t.Fatalf("Got signing time %s, expected first explicit value %s", signingTime, firstSigningTime)
 	}
 }
 
