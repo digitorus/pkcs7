@@ -87,6 +87,15 @@ var (
 	OIDEncryptionAlgorithmAES128GCM  = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 1, 6}
 	OIDEncryptionAlgorithmAES128CBC  = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 1, 2}
 	OIDEncryptionAlgorithmAES256GCM  = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 1, 46}
+
+	// KEM recipient and ML-KEM algorithms (RFC 9629 and RFC 9936).
+	OIDOtherRecipientInfoKEM = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 16, 13, 3}
+	OIDKeyAlgorithmMLKEM512  = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 4, 1}
+	OIDKeyAlgorithmMLKEM768  = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 4, 2}
+	OIDKeyAlgorithmMLKEM1024 = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 4, 3}
+	OIDKDFHKDFSHA256         = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 16, 3, 28}
+	OIDKeyWrapAES128         = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 1, 5}
+	OIDKeyWrapAES256         = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 1, 45}
 )
 
 func getHashForOID(oid asn1.ObjectIdentifier) (crypto.Hash, error) {

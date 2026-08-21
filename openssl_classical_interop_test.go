@@ -308,9 +308,14 @@ func assertEnvelopedDataStructure(t *testing.T, parsed *PKCS7, contentEncryption
 	if len(envelope.RecipientInfos) != 1 {
 		t.Fatalf("recipient count = %d, want 1", len(envelope.RecipientInfos))
 	}
-	if !envelope.RecipientInfos[0].KeyEncryptionAlgorithm.Algorithm.Equal(OIDEncryptionAlgorithmRSA) {
+	var recipient recipientInfo
+	rest, err := asn1.Unmarshal(envelope.RecipientInfos[0].FullBytes, &recipient)
+	if err != nil || len(rest) != 0 {
+		t.Fatalf("decode KeyTransRecipientInfo: %v", err)
+	}
+	if !recipient.KeyEncryptionAlgorithm.Algorithm.Equal(OIDEncryptionAlgorithmRSA) {
 		t.Errorf("key encryption OID = %s, want %s",
-			envelope.RecipientInfos[0].KeyEncryptionAlgorithm.Algorithm, OIDEncryptionAlgorithmRSA)
+			recipient.KeyEncryptionAlgorithm.Algorithm, OIDEncryptionAlgorithmRSA)
 	}
 	if !envelope.EncryptedContentInfo.ContentEncryptionAlgorithm.Algorithm.Equal(contentEncryptionOID) {
 		t.Errorf("content encryption OID = %s, want %s",
