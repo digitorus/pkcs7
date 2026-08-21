@@ -60,7 +60,7 @@ func TestBer2Der_Negatives(t *testing.T) {
 		{[]byte{0x30, 0x80, 0x1, 0x2}, "BER tag length is more than available data"},
 		{[]byte{0x30, 0x03, 0x01, 0x02}, "length is more than available data"},
 		{[]byte{0x30}, endOfBERDataError},
-		// GHSA-mq3g-qwhv-4hgw: malformed BER that must return an error, not panic.
+		// Malformed BER from mozilla-services/pkcs7#94 must return an error, not panic.
 		{[]byte{0x1F, 0x80}, endOfBERDataError},
 		{[]byte{0x1F, 0x05}, endOfBERDataError},
 		{[]byte{0x30, 0x84, 0x01}, endOfBERDataError},
