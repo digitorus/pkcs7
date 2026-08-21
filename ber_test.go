@@ -105,6 +105,64 @@ func TestBer2Der_NestedMultipleIndefinite(t *testing.T) {
 	}
 }
 
+func TestIsIndefiniteTermination(t *testing.T) {
+	tests := []struct {
+		name    string
+		ber     []byte
+		offset  int
+		want    bool
+		wantErr bool
+	}{
+		{
+			name:   "at current offset",
+			ber:    []byte{0x00, 0x00},
+			offset: 0,
+			want:   true,
+		},
+		{
+			name:   "after prefix",
+			ber:    []byte{0x01, 0x00, 0x00},
+			offset: 1,
+			want:   true,
+		},
+		{
+			name:   "does not scan ahead",
+			ber:    []byte{0x01, 0x02, 0x00, 0x00},
+			offset: 0,
+		},
+		{
+			name:    "partial marker",
+			ber:     []byte{0x00},
+			offset:  0,
+			wantErr: true,
+		},
+		{
+			name:    "offset at end",
+			ber:     []byte{0x01, 0x02},
+			offset:  2,
+			wantErr: true,
+		},
+		{
+			name:    "offset past end",
+			ber:     []byte{0x01, 0x02},
+			offset:  3,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := isIndefiniteTermination(tt.ber, tt.offset)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("isIndefiniteTermination() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("isIndefiniteTermination() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestVerifyIndefiniteLengthBer(t *testing.T) {
 	decoded := mustDecodePEM([]byte(testPKCS7))
 

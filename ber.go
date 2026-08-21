@@ -261,7 +261,9 @@ func isIndefiniteTermination(ber []byte, offset int) (bool, error) {
 		return false, errors.New("ber2der: Invalid BER format")
 	}
 
-	return bytes.Index(ber[offset:], []byte{0x0, 0x0}) == 0, nil
+	// An end-of-contents marker terminates the current indefinite-length object
+	// only when it begins at the current offset.
+	return ber[offset] == 0 && ber[offset+1] == 0, nil
 }
 
 func debugprint(format string, a ...interface{}) {
