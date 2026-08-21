@@ -5,6 +5,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/pem"
 	"os"
@@ -26,6 +28,117 @@ func TestVerify(t *testing.T) {
 	expected := []byte("We the People")
 	if !bytes.Equal(p7.Content, expected) {
 		t.Errorf("Signed content does not match.\n\tExpected:%s\n\tActual:%s", expected, p7.Content)
+	}
+}
+
+func TestVerifyWindowsECPublicKeySignerInfo(t *testing.T) {
+	// Produced by Windows Set-AuthenticodeSignature. Windows encodes
+	// id-ecPublicKey with NULL parameters in SignerInfo.signatureAlgorithm.
+	// Source: https://github.com/dotnet/runtime/issues/91168
+	const windowsCMS = "MIIDsgYJKoZIhvcNAQcCoIIDozCCA58CAQExDzANBglghkgBZQMEAgEFADB5BgorBgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLGKX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAp8D/xfac6foOh2152tIkU0NKrrta4U/dQa4koGMiK4aCCAcYwggHCMIIBSaADAgECAhAd3t00MU7jlkH6busjriLsMAoGCCqGSM49BAMCMBoxGDAWBgNVBAMMD1NlbGZTaWduZWQtUDM4NDAeFw0yMzA4MjYyMjE1MDhaFw0yNDA4MjYyMjM1MDhaMBoxGDAWBgNVBAMMD1NlbGZTaWduZWQtUDM4NDB2MBAGByqGSM49AgEGBSuBBAAiA2IABJgs3Gp2QiFXbQM2PWOUJ5ZTkfYk1BQMo1FOd7XDcXR+tFDR1DfCw2FO0ecc9TknF1/mTSMSDVcHCgUgItGnZpDWDsIsmrZADK7zDPNVzQ1g0jTCgynPxRq375ez17orMKNUMFIwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoGCCsGAQUFBwMDMAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFDnvEQtGNdrQeyTPlx5llx8qfMOpMAoGCCqGSM49BAMCA2cAMGQCMFFR1JJyuXk8dLQLVPwpETtf9tvegjNpOoDnoAloPX8LfQTYCwkwMhMtUh6bRfEstgIwWU8RCqznSfGdShOSSa17TKihv5EFKunGqdENBePENEZnG0xgkVlxK3mrYx/HGQZPMYIBQjCCAT4CAQEwLjAaMRgwFgYDVQQDDA9TZWxmU2lnbmVkLVAzODQCEB3e3TQxTuOWQfpu6yOuIuwwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQghZ+zk9aK9SuWZXvyaO4FeJlETeyDb92dWnunLLkMsGowCwYHKoZIzj0CAQUABGYwZAIwHpr18RzesnNn5EBaOgem8zxhQ04MG9TSfSwgESIcSfOt2AwXhopjy6sDLOfUDd3DAjAL1POEajSy+ITCEd7SxW+ed9uDM2BQhUs05Chw1ZPrvn8kjc5YolQQjZG0ykmQibg="
+	der, err := base64.StdEncoding.DecodeString(windowsCMS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p7, err := Parse(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p7.Verify(); err != nil {
+		t.Fatalf("cannot verify Windows id-ecPublicKey CMS: %v", err)
+	}
+
+	signer := p7.Signers[0]
+	if !signer.DigestEncryptionAlgorithm.Algorithm.Equal(OIDPublicKeyAlgorithmEC) {
+		t.Fatalf("got signature algorithm %q, want %q",
+			signer.DigestEncryptionAlgorithm.Algorithm, OIDPublicKeyAlgorithmEC)
+	}
+	if signer.DigestEncryptionAlgorithm.Parameters.Tag != asn1.TagNull {
+		t.Fatalf("got parameters tag %d, want NULL", signer.DigestEncryptionAlgorithm.Parameters.Tag)
+	}
+}
+
+func TestECPublicKeySignatureAlgorithmMapping(t *testing.T) {
+	tests := []struct {
+		name   string
+		digest asn1.ObjectIdentifier
+		want   x509.SignatureAlgorithm
+	}{
+		{name: "SHA-1", digest: OIDDigestAlgorithmSHA1, want: x509.ECDSAWithSHA1},
+		{name: "SHA-256", digest: OIDDigestAlgorithmSHA256, want: x509.ECDSAWithSHA256},
+		{name: "SHA-384", digest: OIDDigestAlgorithmSHA384, want: x509.ECDSAWithSHA384},
+		{name: "SHA-512", digest: OIDDigestAlgorithmSHA512, want: x509.ECDSAWithSHA512},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := getSignatureAlgorithm(
+				pkix.AlgorithmIdentifier{Algorithm: OIDPublicKeyAlgorithmEC},
+				pkix.AlgorithmIdentifier{Algorithm: test.digest},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != test.want {
+				t.Fatalf("got %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestECPublicKeySignatureAlgorithmRejectsInvalidIdentifiers(t *testing.T) {
+	tests := []struct {
+		name       string
+		parameters asn1.RawValue
+		digest     asn1.ObjectIdentifier
+	}{
+		{name: "unsupported digest", digest: asn1.ObjectIdentifier{1, 2, 3, 4}},
+		{
+			name: "named curve parameters",
+			parameters: asn1.RawValue{
+				FullBytes: []byte{0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07},
+			},
+			digest: OIDDigestAlgorithmSHA256,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := getSignatureAlgorithm(
+				pkix.AlgorithmIdentifier{Algorithm: OIDPublicKeyAlgorithmEC, Parameters: test.parameters},
+				pkix.AlgorithmIdentifier{Algorithm: test.digest},
+			)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+}
+
+func TestECPublicKeySignatureAlgorithmRejectsRSAKey(t *testing.T) {
+	pair, err := createTestCertificate(x509.SHA256WithRSA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signedData, err := NewSignedData([]byte("id-ecPublicKey must require an EC key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := signedData.AddSigner(pair.Certificate, *pair.PrivateKey, SignerInfoConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	der, err := signedData.Finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p7, err := Parse(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p7.Signers[0].DigestEncryptionAlgorithm = pkix.AlgorithmIdentifier{
+		Algorithm:  OIDPublicKeyAlgorithmEC,
+		Parameters: asn1.NullRawValue,
+	}
+	if err := p7.Verify(); err == nil {
+		t.Fatal("verified id-ecPublicKey SignerInfo with an RSA certificate")
 	}
 }
 
