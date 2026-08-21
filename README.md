@@ -11,7 +11,7 @@ The module requires Go 1.27 or later.
 import "github.com/digitorus/pkcs7"
 ```
 
-## Post-quantum cryptography
+## Post-Quantum Cryptography (PQC)
 
 CMS SignedData supports ML-DSA-44, ML-DSA-65, and ML-DSA-87 using Go's
 `crypto/mldsa` and `crypto/x509` packages. Signing and verification follow
