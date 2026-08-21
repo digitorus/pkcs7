@@ -411,14 +411,31 @@ func TestSkipSigningTime(t *testing.T) {
 }
 
 func TestSkipSigningTimeFiltersExtraSignedAttributes(t *testing.T) {
+	oidTest := asn1.ObjectIdentifier{2, 3, 4, 5, 6, 7}
+	const testValue = "preserved"
 	p7 := signAndParseWithConfig(t, SignerInfoConfig{
 		SkipSigningTime: true,
 		ExtraSignedAttributes: []Attribute{
 			{Type: OIDAttributeSigningTime, Value: time.Now().UTC()},
+			{Type: oidTest, Value: testValue},
 		},
 	})
 	if n := countSigningTimeAttributes(p7); n != 0 {
 		t.Fatalf("Got %d signing-time signed attribute(s), expected none", n)
+	}
+	var actual string
+	if err := p7.UnmarshalSignedAttribute(oidTest, &actual); err != nil {
+		t.Fatalf("Cannot unmarshal preserved signed attribute: %s", err)
+	}
+	if actual != testValue {
+		t.Fatalf("Got preserved signed attribute %q, expected %q", actual, testValue)
+	}
+}
+
+func TestDefaultSigningTimeIsPreserved(t *testing.T) {
+	p7 := signAndParseWithConfig(t, SignerInfoConfig{})
+	if n := countSigningTimeAttributes(p7); n != 1 {
+		t.Fatalf("Got %d signing-time signed attribute(s), expected exactly one", n)
 	}
 }
 
@@ -438,6 +455,26 @@ func TestExplicitSigningTimeReplacesDefault(t *testing.T) {
 	}
 	if !signingTime.Equal(explicitSigningTime) {
 		t.Fatalf("Got signing time %s, expected %s", signingTime, explicitSigningTime)
+	}
+}
+
+func TestMultipleExplicitSigningTimesUseFirst(t *testing.T) {
+	firstSigningTime := time.Now().UTC().Truncate(time.Second)
+	p7 := signAndParseWithConfig(t, SignerInfoConfig{
+		ExtraSignedAttributes: []Attribute{
+			{Type: OIDAttributeSigningTime, Value: firstSigningTime},
+			{Type: OIDAttributeSigningTime, Value: firstSigningTime.Add(time.Hour)},
+		},
+	})
+	if n := countSigningTimeAttributes(p7); n != 1 {
+		t.Fatalf("Got %d signing-time signed attribute(s), expected exactly one", n)
+	}
+	var signingTime time.Time
+	if err := p7.UnmarshalSignedAttribute(OIDAttributeSigningTime, &signingTime); err != nil {
+		t.Fatalf("Cannot unmarshal signing-time attribute: %s", err)
+	}
+	if !signingTime.Equal(firstSigningTime) {
+		t.Fatalf("Got signing time %s, expected first explicit value %s", signingTime, firstSigningTime)
 	}
 }
 

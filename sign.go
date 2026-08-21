@@ -52,7 +52,8 @@ type SignerInfoConfig struct {
 	SkipCertificates        bool
 	// SkipSigningTime omits the signing-time signed attribute, dropping any
 	// signing-time entry found in ExtraSignedAttributes, as required by
-	// ETSI EN 319 142-1.
+	// ETSI EN 319 142-1. Otherwise, the first explicit signing-time entry
+	// replaces the default and any additional entries are ignored.
 	SkipSigningTime bool
 }
 
@@ -191,9 +192,13 @@ func (sd *SignedData) AddSignerChain(ee *x509.Certificate, keyOrSigner interface
 	if !config.SkipSigningTime && !hasExplicitSigningTime {
 		attrs.Add(OIDAttributeSigningTime, time.Now().UTC())
 	}
+	addedExplicitSigningTime := false
 	for _, attr := range config.ExtraSignedAttributes {
-		if config.SkipSigningTime && attr.Type.Equal(OIDAttributeSigningTime) {
-			continue
+		if attr.Type.Equal(OIDAttributeSigningTime) {
+			if config.SkipSigningTime || addedExplicitSigningTime {
+				continue
+			}
+			addedExplicitSigningTime = true
 		}
 		attrs.Add(attr.Type, attr.Value)
 	}

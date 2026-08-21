@@ -101,6 +101,35 @@ func TestMLDSASignAndVerify(t *testing.T) {
 	}
 }
 
+func TestMLDSASkipSigningTime(t *testing.T) {
+	for _, test := range mlDSATestCases {
+		t.Run(test.name, func(t *testing.T) {
+			certificate, privateKey := createMLDSATestCertificate(t, test)
+			signedData, err := NewSignedData([]byte("CMS ML-DSA without signing-time"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := signedData.AddSigner(certificate, privateKey, SignerInfoConfig{SkipSigningTime: true}); err != nil {
+				t.Fatal(err)
+			}
+			der, err := signedData.Finish()
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed, err := Parse(der)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n := countSigningTimeAttributes(parsed); n != 0 {
+				t.Fatalf("signing-time attribute count = %d, want 0", n)
+			}
+			if err := parsed.Verify(); err != nil {
+				t.Fatalf("verification failed: %v", err)
+			}
+		})
+	}
+}
+
 func TestMLDSARejectsSignatureAlgorithmParameters(t *testing.T) {
 	for _, test := range mlDSATestCases {
 		t.Run(test.name, func(t *testing.T) {
