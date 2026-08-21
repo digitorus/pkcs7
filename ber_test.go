@@ -9,7 +9,10 @@ import (
 	"testing"
 )
 
+const endOfBERDataError = "end of ber data reached"
+
 func TestBer2Der(t *testing.T) {
+	t.Parallel()
 	// indefinite length fixture
 	ber := []byte{0x30, 0x80, 0x02, 0x01, 0x01, 0x00, 0x00}
 	expected := []byte{0x30, 0x03, 0x02, 0x01, 0x01}
@@ -40,14 +43,15 @@ func TestBer2Der(t *testing.T) {
 }
 
 func TestBer2Der_Negatives(t *testing.T) {
+	t.Parallel()
 	fixtures := []struct {
 		Input         []byte
 		ErrorContains string
 	}{
 		{[]byte{}, "input ber is empty"},
-		{[]byte{0x30}, "cannot move offset forward, end of ber data reached"},
+		{[]byte{0x30}, "cannot move offset forward, " + endOfBERDataError},
 		{[]byte{0x30, 0x08}, "BER tag length is more than available dat"},
-		{[]byte{0x30, 0x81}, "cannot move offset forward, end of ber data reached"},
+		{[]byte{0x30, 0x81}, "cannot move offset forward, " + endOfBERDataError},
 		{[]byte{0x30, 0x81, 0x00}, "BER tag length has leading zero"},
 		{[]byte{0x30, 0x85, 0x00}, "tag length too long"},
 		{[]byte{0x30, 0x84, 0x80, 0x0, 0x0, 0x0}, "length is negative"},
@@ -55,7 +59,11 @@ func TestBer2Der_Negatives(t *testing.T) {
 		{[]byte{0x30, 0x80, 0x1, 0x2, 0x1, 0x2}, "Invalid BER format"},
 		{[]byte{0x30, 0x80, 0x1, 0x2}, "BER tag length is more than available data"},
 		{[]byte{0x30, 0x03, 0x01, 0x02}, "length is more than available data"},
-		{[]byte{0x30}, "end of ber data reached"},
+		{[]byte{0x30}, endOfBERDataError},
+		// GHSA-mq3g-qwhv-4hgw: malformed BER that must return an error, not panic.
+		{[]byte{0x1F, 0x80}, endOfBERDataError},
+		{[]byte{0x1F, 0x05}, endOfBERDataError},
+		{[]byte{0x30, 0x84, 0x01}, endOfBERDataError},
 	}
 
 	for _, fixture := range fixtures {
@@ -69,7 +77,41 @@ func TestBer2Der_Negatives(t *testing.T) {
 	}
 }
 
+func TestParseMalformedBERNoPanic(t *testing.T) {
+	t.Parallel()
+	fixtures := [][]byte{
+		{0x1F, 0x80},
+		{0x1F, 0x05},
+		{0x30, 0x81},
+		{0x30, 0x84, 0x01},
+	}
+	for _, input := range fixtures {
+		if _, err := Parse(input); err == nil {
+			t.Errorf("Parse(% X): expected error, got nil", input)
+		}
+	}
+}
+
+func TestBer2DerHighTagNumber(t *testing.T) {
+	t.Parallel()
+	fixtures := [][]byte{
+		{0x1F, 0x1F, 0x02, 0x01, 0x07}, // tag number 31
+		{0x1F, 0x81, 0x00, 0x01, 0x41}, // tag number 128
+	}
+	for _, input := range fixtures {
+		der, err := ber2der(input)
+		if err != nil {
+			t.Errorf("ber2der(% X) failed: %v", input, err)
+			continue
+		}
+		if !bytes.Equal(der, input) {
+			t.Errorf("ber2der(% X) = % X, want unchanged", input, der)
+		}
+	}
+}
+
 func TestBer2Der_NestedMultipleIndefinite(t *testing.T) {
+	t.Parallel()
 	// indefinite length fixture
 	ber := []byte{0x30, 0x80, 0x30, 0x80, 0x02, 0x01, 0x01, 0x00, 0x00, 0x30, 0x80, 0x02, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00}
 	expected := []byte{0x30, 0x0A, 0x30, 0x03, 0x02, 0x01, 0x01, 0x30, 0x03, 0x02, 0x01, 0x02}
@@ -164,12 +206,30 @@ func TestIsIndefiniteTermination(t *testing.T) {
 }
 
 func TestVerifyIndefiniteLengthBer(t *testing.T) {
+	t.Parallel()
 	decoded := mustDecodePEM([]byte(testPKCS7))
 
 	_, err := ber2der(decoded)
 	if err != nil {
 		t.Errorf("cannot parse indefinite length ber: %v", err)
 	}
+}
+
+func FuzzParse(f *testing.F) {
+	for _, seed := range [][]byte{
+		{},
+		{0x1F, 0x80},
+		{0x1F, 0x05},
+		{0x30, 0x81},
+		{0x30, 0x84, 0x01},
+		{0x30, 0x80, 0x02, 0x01, 0x01, 0x00, 0x00},
+		{0x1F, 0x81, 0x00, 0x01, 0x41},
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, input []byte) {
+		_, _ = Parse(input)
+	})
 }
 
 func mustDecodePEM(data []byte) []byte {
