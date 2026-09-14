@@ -212,10 +212,10 @@ func readObject(ber []byte, offset, depth int) (asn1Object, int, error) {
 		return nil, 0, errors.New("ber2der: invalid negative value found in BER tag length")
 	}
 	// fmt.Printf("--> length        : %d\n", length)
-	contentEnd := offset + length
-	if contentEnd > berLen {
+	if length > berLen-offset {
 		return nil, 0, errors.New("ber2der: BER tag length is more than available data")
 	}
+	contentEnd := offset + length
 	debugprint("--> content start : %d\n", offset)
 	debugprint("--> content end   : %d\n", contentEnd)
 	// debugprint("--> content       : %x\n", ber[offset:contentEnd])
@@ -231,36 +231,29 @@ func readObject(ber []byte, offset, depth int) (asn1Object, int, error) {
 		}
 	} else {
 		var subObjects []asn1Object
+		// Restrict every descendant, including indefinite-length children, to
+		// this object's content before parsing it. A check after recursion
+		// would allow work on bytes outside the parent before rejecting them.
+		if !indefinite {
+			ber = ber[:contentEnd]
+		}
 		for (offset < contentEnd) || indefinite {
+			if indefinite {
+				terminated, err := isIndefiniteTermination(ber, offset)
+				if err != nil {
+					return nil, 0, err
+				}
+				if terminated {
+					break
+				}
+			}
 			var subObj asn1Object
 			var err error
 			subObj, offset, err = readObject(ber, offset, depth+1)
 			if err != nil {
 				return nil, 0, err
 			}
-			// A child must never claim bytes beyond its parent's declared
-			// content boundary. Without this check a malformed definite-length
-			// child that overruns its parent causes the parent to resume
-			// parsing from a stale, understated offset - re-entering and
-			// re-encoding byte ranges that were already consumed deeper in
-			// the tree. Repeated across nesting levels this turns a tiny
-			// input into an exponential blow-up of allocations during
-			// EncodeTo. Reject it immediately instead.
-			if !indefinite && offset > contentEnd {
-				return nil, 0, errors.New("ber2der: child element length exceeds parent element boundary")
-			}
 			subObjects = append(subObjects, subObj)
-
-			if indefinite {
-				terminated, err := isIndefiniteTermination(ber, offset)
-				if err != nil {
-					return nil, 0, err
-				}
-
-				if terminated {
-					break
-				}
-			}
 		}
 		obj = asn1Structured{
 			tagBytes: ber[tagStart:tagEnd],

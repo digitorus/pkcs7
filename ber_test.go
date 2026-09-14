@@ -343,7 +343,7 @@ func TestBer2Der_OverlappingLengthDoS(t *testing.T) {
 		if derErr == nil {
 			t.Fatal("expected ber2der to reject the malformed input, got nil error")
 		}
-		if !strings.Contains(derErr.Error(), "exceeds parent element boundary") {
+		if !strings.Contains(derErr.Error(), "BER tag length is more than available data") {
 			t.Fatalf("unexpected error: %v", derErr)
 		}
 	case <-time.After(2 * time.Second):
