@@ -3,10 +3,12 @@ package pkcs7
 import (
 	"bytes"
 	"encoding/asn1"
+	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 const endOfBERDataError = "end of ber data reached"
@@ -307,3 +309,44 @@ iuZidpUfFhSk+Ls7TU/kB74ckfUGj5q/5HcKJgb/S+FYUV7eu0ewzTyW1uRl/d0U
 Tb7e7EjgDGJsjOTMdTrMfv8ho8kAAAAAAAA=
 -----END PKCS7-----
 `
+
+// TestBer2Der_OverlappingLengthDoS is a regression test for a
+// privately-reported denial-of-service: a definite-length constructed
+// element whose descendants (recursively) overrun the element's own
+// declared length was silently accepted. readObject returned the
+// element's stale, too-small declared boundary instead of the position
+// actually reached, so an indefinite-length ancestor would resume
+// parsing inside a region that had already been consumed deeper in the
+// tree, re-parsing and re-encoding it. Repeated across nesting levels
+// this drove memory use from ~130 input bytes into the gigabytes.
+//
+// Reported by Andrei Beshkov (Keyorix) via coordinated disclosure,
+// 2026-09-14.
+func TestBer2Der_OverlappingLengthDoS(t *testing.T) {
+	t.Parallel()
+
+	ber, err := base64.StdEncoding.DecodeString(
+		"MIAwAjACMAIwAjACMAIwMDACMDAwAjAwMAIwIDACMCAwAjAgMAIwIDACMCAwAjACMAIwAjACMAIwAjACMAIwMDACMAIwAjACMAIwAjACMDAwAjAwMAIwMDACMCAwAjAgMAIwIDACMCAwAjACMAIwAjACMAIwAjACMAIwAjACMAIwAjACQQIwMDA=")
+	if err != nil {
+		t.Fatalf("failed to decode fixture: %v", err)
+	}
+
+	done := make(chan struct{})
+	var derErr error
+	go func() {
+		defer close(done)
+		_, derErr = ber2der(ber)
+	}()
+
+	select {
+	case <-done:
+		if derErr == nil {
+			t.Fatal("expected ber2der to reject the malformed input, got nil error")
+		}
+		if !strings.Contains(derErr.Error(), "exceeds parent element boundary") {
+			t.Fatalf("unexpected error: %v", derErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ber2der did not return within 2s; overlapping-length DoS regressed")
+	}
+}

@@ -5,6 +5,12 @@ import (
 	"errors"
 )
 
+// maxNestingDepth bounds recursive descent into constructed BER/DER objects.
+// Legitimate PKCS#7/CMS structures do not nest anywhere close to this deep;
+// the limit exists purely as defense in depth against malformed or
+// adversarial input driving unbounded recursion.
+const maxNestingDepth = 500
+
 type asn1Object interface {
 	EncodeTo(writer *bytes.Buffer) error
 }
@@ -57,7 +63,7 @@ func ber2der(ber []byte) ([]byte, error) {
 	// fmt.Printf("--> ber2der: Transcoding %d bytes\n", len(ber))
 	out := new(bytes.Buffer)
 
-	obj, _, err := readObject(ber, 0)
+	obj, _, err := readObject(ber, 0, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +130,10 @@ func encodeLength(out *bytes.Buffer, length int) (err error) {
 	return
 }
 
-func readObject(ber []byte, offset int) (asn1Object, int, error) {
+func readObject(ber []byte, offset, depth int) (asn1Object, int, error) {
+	if depth > maxNestingDepth {
+		return nil, 0, errors.New("ber2der: maximum nesting depth exceeded")
+	}
 	berLen := len(ber)
 	if offset >= berLen {
 		return nil, 0, errors.New("ber2der: offset is after end of ber data")
@@ -225,9 +234,20 @@ func readObject(ber []byte, offset int) (asn1Object, int, error) {
 		for (offset < contentEnd) || indefinite {
 			var subObj asn1Object
 			var err error
-			subObj, offset, err = readObject(ber, offset)
+			subObj, offset, err = readObject(ber, offset, depth+1)
 			if err != nil {
 				return nil, 0, err
+			}
+			// A child must never claim bytes beyond its parent's declared
+			// content boundary. Without this check a malformed definite-length
+			// child that overruns its parent causes the parent to resume
+			// parsing from a stale, understated offset - re-entering and
+			// re-encoding byte ranges that were already consumed deeper in
+			// the tree. Repeated across nesting levels this turns a tiny
+			// input into an exponential blow-up of allocations during
+			// EncodeTo. Reject it immediately instead.
+			if !indefinite && offset > contentEnd {
+				return nil, 0, errors.New("ber2der: child element length exceeds parent element boundary")
 			}
 			subObjects = append(subObjects, subObj)
 
