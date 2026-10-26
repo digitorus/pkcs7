@@ -1,0 +1,294 @@
+package pkcs7
+
+import (
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
+	"testing"
+)
+
+// TestVerifyRSAPSSTimestampToken verifies an RFC 3161 time-stamp token issued
+// by a qualified TSA (SwissSign ZertES TSA UNIT 2025 - 1) whose SignerInfo is
+// signed with RSASSA-PSS: SHA-512, MGF1 with SHA-512, salt length 64.
+func TestVerifyRSAPSSTimestampToken(t *testing.T) {
+	fixture := UnmarshalTestFixture(RSAPSSTimestampTokenFixture)
+	p7, err := Parse(fixture.Input)
+	if err != nil {
+		t.Fatalf("Parse encountered unexpected error: %v", err)
+	}
+	if len(p7.Certificates) != 4 {
+		t.Errorf("expected 4 certificates, got %d", len(p7.Certificates))
+	}
+	if err := p7.Verify(); err != nil {
+		t.Fatalf("Verify failed with error: %v", err)
+	}
+
+	// The signature value is the last element of the token; flipping its
+	// final byte must make verification fail.
+	tampered := append([]byte(nil), fixture.Input...)
+	tampered[len(tampered)-1] ^= 0x01
+	p7, err = Parse(tampered)
+	if err != nil {
+		t.Fatalf("Parse of tampered token encountered unexpected error: %v", err)
+	}
+	if err := p7.Verify(); err == nil {
+		t.Error("Verify succeeded on a tampered RSASSA-PSS signature")
+	}
+}
+
+func TestGetRSAPSSSignatureAlgorithm(t *testing.T) {
+	hashID := func(oid asn1.ObjectIdentifier) pkix.AlgorithmIdentifier {
+		return pkix.AlgorithmIdentifier{Algorithm: oid, Parameters: asn1.NullRawValue}
+	}
+	mgf1 := func(oid asn1.ObjectIdentifier) pkix.AlgorithmIdentifier {
+		der, err := asn1.Marshal(hashID(oid))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pkix.AlgorithmIdentifier{Algorithm: OIDMaskGenerationFunctionMGF1, Parameters: asn1.RawValue{FullBytes: der}}
+	}
+	params := func(p pssParameters) asn1.RawValue {
+		der, err := asn1.Marshal(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return asn1.RawValue{FullBytes: der}
+	}
+	pss := func(oid asn1.ObjectIdentifier, salt int) pssParameters {
+		return pssParameters{Hash: hashID(oid), MGF: mgf1(oid), SaltLength: salt, TrailerField: 1}
+	}
+
+	for _, tc := range []struct {
+		name   string
+		params asn1.RawValue
+		digest asn1.ObjectIdentifier
+		want   x509.SignatureAlgorithm
+	}{
+		{"SHA-256", params(pss(OIDDigestAlgorithmSHA256, 32)), OIDDigestAlgorithmSHA256, x509.SHA256WithRSAPSS},
+		{"SHA-384", params(pss(OIDDigestAlgorithmSHA384, 48)), OIDDigestAlgorithmSHA384, x509.SHA384WithRSAPSS},
+		{"SHA-512", params(pss(OIDDigestAlgorithmSHA512, 64)), OIDDigestAlgorithmSHA512, x509.SHA512WithRSAPSS},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := getSignatureAlgorithm(
+				pkix.AlgorithmIdentifier{Algorithm: OIDEncryptionAlgorithmRSAPSS, Parameters: tc.params},
+				pkix.AlgorithmIdentifier{Algorithm: tc.digest})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	mgfMismatch := pss(OIDDigestAlgorithmSHA256, 32)
+	mgfMismatch.MGF = mgf1(OIDDigestAlgorithmSHA512)
+	trailer := pss(OIDDigestAlgorithmSHA256, 32)
+	trailer.TrailerField = 2
+	for _, tc := range []struct {
+		name   string
+		params asn1.RawValue
+		digest asn1.ObjectIdentifier
+	}{
+		{"absent parameters (SHA-1 defaults)", asn1.RawValue{}, OIDDigestAlgorithmSHA1},
+		{"SHA-1", params(pss(OIDDigestAlgorithmSHA1, 20)), OIDDigestAlgorithmSHA1},
+		{"salt length differs from hash", params(pss(OIDDigestAlgorithmSHA256, 20)), OIDDigestAlgorithmSHA256},
+		{"MGF1 hash differs", params(mgfMismatch), OIDDigestAlgorithmSHA256},
+		{"trailer field", params(trailer), OIDDigestAlgorithmSHA256},
+		{"digest algorithm differs", params(pss(OIDDigestAlgorithmSHA256, 32)), OIDDigestAlgorithmSHA512},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := getSignatureAlgorithm(
+				pkix.AlgorithmIdentifier{Algorithm: OIDEncryptionAlgorithmRSAPSS, Parameters: tc.params},
+				pkix.AlgorithmIdentifier{Algorithm: tc.digest}); err == nil {
+				t.Error("expected an error")
+			}
+		})
+	}
+}
+
+// RSAPSSTimestampTokenFixture is a time-stamp token from https://tsa.swisssign.ch
+// over SHA-256 of "RSASSA-PSS test vector", issued on 2026-10-26 and
+// requested with certReq set, so it carries the full chain up to the root.
+var RSAPSSTimestampTokenFixture = `
+-----BEGIN PKCS7-----
+MIIhTgYJKoZIhvcNAQcCoIIhPzCCITsCAQMxDTALBglghkgBZQMEAgMwggEEBgsq
+hkiG9w0BCRABBKCB9ASB8TCB7gIBAQYIYIV0AVkCARgwMTANBglghkgBZQMEAgEF
+AAQgIhqN2MFIfe+u7Na3BKixoe0WlDI3cx+qsXujAjiJbCQCFFKpsvtUOf5X/w0V
+qMEbb2C+LmfaGA8yMDI2MTAyNjE0MDYyMFowAwIBAgIJAPK+qwagAFfroHWkczBx
+MQswCQYDVQQGEwJDSDEeMBwGA1UEYQwVTlRSQ0gtQ0hFLTEwOS4zNTcuMDEyMRUw
+EwYDVQQKEwxTd2lzc1NpZ24gQUcxKzApBgNVBAMMIlN3aXNzU2lnbiBaZXJ0RVMg
+VFNBIFVOSVQgMjAyNSAtIDGgghv/MIIF4DCCA8igAwIBAgIPL9upuI0AHrznuZwt
+I+9KMA0GCSqGSIb3DQEBCwUAMHkxCzAJBgNVBAYTAkNIMRUwEwYDVQQKEwxTd2lz
+c1NpZ24gQUcxMzAxBgNVBAMTKlN3aXNzU2lnbiBTaWduYXR1cmUgU2VydmljZXMg
+Um9vdCAyMDIwIC0gMjEeMBwGA1UEYRMVTlRSQ0gtQ0hFLTEwOS4zNTcuMDEyMCAX
+DTIwMTAwNzEwMTkzMloYDzIwNTAwOTMwMTAxOTMyWjB5MQswCQYDVQQGEwJDSDEV
+MBMGA1UEChMMU3dpc3NTaWduIEFHMTMwMQYDVQQDEypTd2lzc1NpZ24gU2lnbmF0
+dXJlIFNlcnZpY2VzIFJvb3QgMjAyMCAtIDIxHjAcBgNVBGETFU5UUkNILUNIRS0x
+MDkuMzU3LjAxMjCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBANuQySrf
+gtsy1ZRN0Ttg35LSon4m+OwLN7X7dc7zUIjfHaqlTo6s1mTb0K6vcZ88TIjiLTmf
+uUQOUy8tQctEwGyMDG0rMwkaTGZOxWg9UIIWDmBd93ssWCUxvZtNLzsX2m2feUu0
+E4Es8o9BijpMonC3Y6Wx7qATwieQIopBhFAXaL7xFnK5r0Nc53Ht38fmlWd8Nju7
+ovA6F/IsJp8zsE9HFQK4NYCQbD2vCwma11kVlFPMbhbqImfItBl8NzlqMugrdSE3
+CpcgmrSp7M05ogNY/SMMAMimFpwshou7atU4jxFDrVo9pdfRQ99iKcWNewHs+HlA
+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
+aWduLmNvbS9Td2lzc1NpZ25fQ1BTX1NpZ25pbmcucGRmMCMGCCsGAQUFBwICMBcW
+FXJlZ3VsYXRlZCBjZXJ0aWZpY2F0ZTBRBgNVHR8ESjBIMEagRKBChkBodHRwOi8v
+Y3JsLnN3aXNzc2lnbi5jaC9jZHAtNjhhYzJhNWYtZDJiOS00OWM1LThhNTMtMmMz
+YTljNjRkYjZhMA4GA1UdDwEB/wQEAwIBBjAdBgNVHQ4EFgQU7wxah9Nu9Y+eJ4p8
+zlkx9ic+Pg4wHwYDVR0jBBgwFoAUB5D9Z26HGqFD/f1fRngKG/ccXjkwPQYJKoZI
+hvcNAQEKMDCgDTALBglghkgBZQMEAgOhGjAYBgkqhkiG9w0BAQgwCwYJYIZIAWUD
+BAIDogMCAUADggIBABiNdOwPs7TOmk1+MTa2guSpWItjRvvzdAEE+Rep1NDdhpc9
+ROyo/URZTppVHr1f6psGVJ7I0awL9bE4y0ruLR/pindV/bfIDAN4PpjpDScy6m3v
+etpORiWsQNaNdQWRTbPHLhcJeQnG/1zJH+WSvndMfRfA93DbamyGUP5jHzFF1Xqm
+l6AHI1EfeSOOPdE77+NDvZ4GDuvFaMzKWG++7GRBfV517gKxfLiKXgXg5HKnxXL1
+xWibkL8GJ7jXnQqdhVZ4KBl9CifYpopDSbjK7pzJpE9VlkCMED9QC5fghmIZ8+Yd
+7ZX1xeXvR2jJMnp8X0wkWDY8iMmXV91DeEx3jpWfbFbEg7C+SmNSIO6lLue/talN
+AA82d12On1EUQAM5ayEwUcgRr+7yqLXfZNZUC1+5XYkuSDhwIYQS3zfrGRONpGog
+Ut0HDfw9WSh6FFQ4l3Dn9lEWdsiraz18+BJ+l+6CJGmlRXQNGrTYSWL+kepW2x8o
+PjiGRBbf7zlveo/FSOvlF/UpHsE3+M1Hh+MxgvPpkgSk5OXWeZy6qeqPOL84llJt
+4Dq8JihY2jYioDcFKvIXCZOYoAjnjpn96KJEdF91/SXo/it/1OdSOAepQ94XOjIA
+nz87CJnKzmVboZhoXsrUahFX+WUQ7mYC6J7tv+d0BLYlrNJRoDC0hXDkYpb7MIII
+MzCCBeegAwIBAgIUQbI6DTirNSFVk53RafIX4aCkuDcwQQYJKoZIhvcNAQEKMDSg
+DzANBglghkgBZQMEAgMFAKEcMBoGCSqGSIb3DQEBCDANBglghkgBZQMEAgMFAKID
+AgFAMIGDMQswCQYDVQQGEwJDSDEeMBwGA1UEYQwVTlRSQ0gtQ0hFLTEwOS4zNTcu
+MDEyMRUwEwYDVQQKEwxTd2lzc1NpZ24gQUcxPTA7BgNVBAMTNFN3aXNzU2lnbiBS
+U0EgU0lHTiBaZXJ0RVMgUXVhbGlmaWVkIFRTQSBJQ0EgMjAyMyAtIDEwHhcNMjUx
+MDAyMDg1MTQ1WhcNMjgxMDAyMDg1MTQ1WjBxMQswCQYDVQQGEwJDSDEeMBwGA1UE
+YQwVTlRSQ0gtQ0hFLTEwOS4zNTcuMDEyMRUwEwYDVQQKEwxTd2lzc1NpZ24gQUcx
+KzApBgNVBAMMIlN3aXNzU2lnbiBaZXJ0RVMgVFNBIFVOSVQgMjAyNSAtIDEwggGi
+MA0GCSqGSIb3DQEBAQUAA4IBjwAwggGKAoIBgQDEXGo0wYXUOJdOAU5vBHgH+Iy9
+pP8GWpoJL+56ljpihWlczBURc87xAKOXhySMKMNeFIe2OAPABRUDaaac/oe1+rKi
+rDB6quZ1wdWpV6XkwCBwI25eUwVYhGwLV7OPD9uoCS7keAeEt+cPqFYe1nc4IOvw
+PmcI+WItSDiwWo1+0s9PWxtGS8xSljxLLCbAIaW3PCvUkqpd1K0QXR8bozHKwhim
+08/HjIAguxL1IA45+2JM1oHGlaCw2u0IdCFN8+ek1pbyJGzyVNVXMBVSHA6d8lMt
+QTIExan5fETxKEQAQetbGjAIfXkpfNZm9mk596dOx14hFAyUDjOR7xQL8ufiEVd0
+v0mOCpOcfaSoAASESI47O5quvYwEoTpESLQrU0uFs4DzbEIGkkBm4XK3RnM58CfV
+Mo0DfGQCwd0QOhBVvK4Po9VP+Ts8RKOdVfQ5jmraOlbqRcuk8Y2nYTZmTb8qWtzK
+nXgyaslk4+O8dkP2q8eEusydzPrGgud6hRVOYcsCAwEAAaOCAsYwggLCMIGyBggr
+BgEFBQcBAQSBpTCBojBMBggrBgEFBQcwAoZAaHR0cDovL2FpYS5zd2lzc3NpZ24u
+Y2gvYWlyLWJkOTU5ZjUwLWFhMmUtNGYwMi1iNTJmLTJmMjlkYjQwY2I2NzBSBggr
+BgEFBQcwAYZGaHR0cDovL29jc3Auc3dpc3NzaWduLmNoL3NpZ24vb2NzLWNiZDRj
+YWZhLWU1MGEtNGM4OC1hMGVjLTA2Y2RjNGU3NmZiMTCBkQYDVR0gBIGJMIGGMAkG
+BwQAi+xAAQMweQYIYIV0AVkCARgwbTBGBggrBgEFBQcCARY6aHR0cHM6Ly9yZXBv
+c2l0b3J5LnN3aXNzc2lnbi5jb20vU3dpc3NTaWduX0NQU19TaWduaW5nLnBkZjAj
+BggrBgEFBQcCAjAXFhVyZWd1bGF0ZWQgY2VydGlmaWNhdGUwUQYDVR0fBEowSDBG
+oESgQoZAaHR0cDovL2NybC5zd2lzc3NpZ24uY2gvY2RwLTQxNzc2NjJiLTQyMWYt
+NGU1NC1hY2Q2LWFlYzBkMWI5OGY1NzArBgNVHRAEJDAigA8yMDI1MDkzMDIyMDAw
+MFqBDzIwMjYxMTMwMjMwMDAwWjAWBgNVHSUBAf8EDDAKBggrBgEFBQcDCDAOBgNV
+HQ8BAf8EBAMCB4AwHQYDVR0OBBYEFFveilmnMjVli30dewGbOoJEyDIIMB8GA1Ud
+IwQYMBaAFO8MWofTbvWPnieKfM5ZMfYnPj4OMIGOBggrBgEFBQcBAwSBgTB/MAgG
+BgQAjkYBATAOBgYEAI5GAQcwBBYCQ0gwCAYGBACORgEEMBMGBgQAjkYBBjAJBgcE
+AI5GAQYCMEQGBgQAjkYBBTA6MDgWMmh0dHBzOi8vcmVwb3NpdG9yeS5zd2lzc3Np
+Z24uY29tL1N3aXNzU2lnbi1QRFMucGRmEwJlbjBBBgkqhkiG9w0BAQowNKAPMA0G
+CWCGSAFlAwQCAwUAoRwwGgYJKoZIhvcNAQEIMA0GCWCGSAFlAwQCAwUAogMCAUAD
+ggIBAIcyUIKK7yUeQDwQ1CEEA0Kd7gUtLzxkdN4nIeANJp9vt/o6SY8IYz7OnC+U
+6gC2soBQjcJc96/NoK5ABPFr/flMU6ZVCJROKeyL42MXLXzTAGluVEDtN8zWekLi
+tRJGUhIdeXr04Seu46jYdcABKLeQzHfciQiKMvk9AK3vYZ5jMrUKThh03njAEDrF
+tIxiV5G62l7kcZeRSrqdpVqRQYWfFMWBVN7/bexV6bEBYpqT/hgkCQtEorJjxaNO
+6KJwfwiGz0vQjw5QTf2gY0zAZXBc0aVTVoZO5zfr+pDfA7kHR2fiHQZHGQr5tC0n
+947Z+qwAWz1KmumEKUimy4ZUCGFGRs89hggHjQYp3JJ1bzYTXqsZwqNxMpeVD1tt
+Jj7eaK0Aq8G+kYu513zkjSOYpifMuOCUEbUF6fr/aHl9nQ617KUMXXP1e2+bP2yv
+wYZDpybdaDmghfnK1dUHbZb2jUnPGH+AnzOjXC7wIz6kO1JfktJ/4WLcghSKOewi
++T2rDlkznmnsDYddkiRUx6ImYK4ysvrTf/PkWyjOQR4VMkhYDiAkqORTAPSzKCXt
+1aHbERXkp7MbAwe/xqXyn0MHRZA3Gl06x1am9nwfZTe9oUiJ0v2MpilOxLTBqi/a
+zSeftBdYfiTknS+aGOotm+9mJbFM7zPo6OYjgguXenjaoE+6MYIEGjCCBBYCAQEw
+gZwwgYMxCzAJBgNVBAYTAkNIMR4wHAYDVQRhDBVOVFJDSC1DSEUtMTA5LjM1Ny4w
+MTIxFTATBgNVBAoTDFN3aXNzU2lnbiBBRzE9MDsGA1UEAxM0U3dpc3NTaWduIFJT
+QSBTSUdOIFplcnRFUyBRdWFsaWZpZWQgVFNBIElDQSAyMDIzIC0gMQIUQbI6DTir
+NSFVk53RafIX4aCkuDcwCwYJYIZIAWUDBAIDoIIBnDAaBgkqhkiG9w0BCQMxDQYL
+KoZIhvcNAQkQAQQwHAYJKoZIhvcNAQkFMQ8XDTI2MTAyNjE0MDYyMFowTwYJKoZI
+hvcNAQkEMUIEQEoSU5BXdPd3sS/x9dcbPp9zEiU2ATbRTWa8vhCyrvLBKkiDW650
+N8IiLShQFGvjpMEtVqlsOB2Vva2mcFazeB8wggENBgsqhkiG9w0BCRACLzGB/TCB
++jCB9zCB9DALBglghkgBZQMEAgMEQLU4RODP4sNaZSO1LBgSOq0LQDfOG/IxCaGW
+u+AqnMar9P8B/md/vqixFCcJH0txAS+lfu9086zdpjeYiMqEjscwgaIwgYmkgYYw
+gYMxCzAJBgNVBAYTAkNIMR4wHAYDVQRhDBVOVFJDSC1DSEUtMTA5LjM1Ny4wMTIx
+FTATBgNVBAoTDFN3aXNzU2lnbiBBRzE9MDsGA1UEAxM0U3dpc3NTaWduIFJTQSBT
+SUdOIFplcnRFUyBRdWFsaWZpZWQgVFNBIElDQSAyMDIzIC0gMQIUQbI6DTirNSFV
+k53RafIX4aCkuDcwQQYJKoZIhvcNAQEKMDSgDzANBglghkgBZQMEAgMFAKEcMBoG
+CSqGSIb3DQEBCDANBglghkgBZQMEAgMFAKIDAgFABIIBgBPhnf/YrPM3cWjgM2Dh
+/srP+BKEegjB92ut2O5vMHOW/YwzdqrJgRUjEizgD38oovYnG5Rp0cVLLckzRgdF
+684u+v5VWjlh3HhcUM1uk3/ZKlkUdKXj3grYIaBIiF+KVAMYEutn9PrL9JGLOddY
+VwbWmsMB0d1KJT5S4yv1ujeIq0E+A232ZdAsnEmdrN4KQfWR+HL6B97CFQ1lcLAC
+AoEb9918VcTU8Vd2FtHkvh9uJVEK7jDqp48F4xshya/tlIIKGlOAj+isZR5dzEnA
+cqi9FIt7w5P5PwWP7b0vR8Fs+leNefY87cF5h+21g0zYwWkrSCCCfqXsBaSfGmU0
+jki2EL1S1zmMtMPZEbSe0O5jVF4wcJVvKaW/7JXV8Bb4lfssee+JO9nOMx3o4/u9
+2IpJq7Ol19m6YJJKad+b/hkm+iKFcHGnXAwVKkqdZXP4+5U8dDPXDvy58ROluH7C
+u6iqAFXv2C8Q0wXJ7C0uDPgZPklEpe/9UTF/ZDOCntXQqA==
+-----END PKCS7-----
+`
