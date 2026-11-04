@@ -110,6 +110,7 @@ func TestGetRSAPSSSignatureAlgorithm(t *testing.T) {
 // RSAPSSTimestampTokenFixture is a time-stamp token from https://tsa.swisssign.ch
 // over SHA-256 of "RSASSA-PSS test vector", issued on 2026-10-26 and
 // requested with certReq set, so it carries the full chain up to the root.
+// #nosec G101 -- Public signed timestamp response used as a verification fixture; contains no credentials.
 var RSAPSSTimestampTokenFixture = `
 -----BEGIN PKCS7-----
 MIIhTgYJKoZIhvcNAQcCoIIhPzCCITsCAQMxDTALBglghkgBZQMEAgMwggEEBgsq
