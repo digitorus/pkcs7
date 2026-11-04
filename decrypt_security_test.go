@@ -73,6 +73,7 @@ func TestCBCPaddingSecurity(t *testing.T) {
 				for padlen := 0; padlen < 256; padlen++ {
 					plain := bytes.Repeat([]byte{byte(padlen)}, size)
 					ciphertext := make([]byte, size)
+					// #nosec G407 -- A fixed IV is intentional for synthetic padding-validation fixtures.
 					cipher.NewCBCEncrypter(alg.block, make([]byte, size)).CryptBlocks(ciphertext, plain)
 					eci := encryptedContentInfo{ContentEncryptionAlgorithm: pkix.AlgorithmIdentifier{Algorithm: alg.oid, Parameters: asn1.RawValue{Bytes: make([]byte, size)}}, EncryptedContent: asn1.RawValue{Bytes: ciphertext}}
 					if compound {
