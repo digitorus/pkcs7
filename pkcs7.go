@@ -33,6 +33,13 @@ type contentInfo struct {
 	Content     asn1.RawValue `asn1:"explicit,optional,tag:0"`
 }
 
+// contentInfoOf marshals a ContentInfo together with its content in a single
+// pass, so the content is copied into the output only once.
+type contentInfoOf[T any] struct {
+	ContentType asn1.ObjectIdentifier
+	Content     T `asn1:"explicit,tag:0"`
+}
+
 // ErrUnsupportedContentType is returned when a PKCS7 content is not supported.
 // Currently only Data (1.2.840.113549.1.7.1), Signed Data (1.2.840.113549.1.7.2),
 // and Enveloped Data are supported (1.2.840.113549.1.7.3)

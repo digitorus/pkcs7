@@ -350,3 +350,27 @@ func TestBer2Der_OverlappingLengthDoS(t *testing.T) {
 		t.Fatal("ber2der did not return within 2s; overlapping-length DoS regressed")
 	}
 }
+
+func TestBer2DerDERInputDoesNotAllocate(t *testing.T) {
+	der := UnmarshalTestFixture(SignedTestFixture).Input
+	allocs := testing.AllocsPerRun(100, func() {
+		if _, err := ber2der(der); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("ber2der allocated %.0f times for DER input", allocs)
+	}
+}
+
+func TestBer2DerNonMinimalLengthIsTranscoded(t *testing.T) {
+	// The outer SEQUENCE uses a long-form length for a short value.
+	ber := []byte{0x30, 0x81, 0x03, 0x02, 0x01, 0x05, 0xFF}
+	der, err := ber2der(ber)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []byte{0x30, 0x03, 0x02, 0x01, 0x05}; !bytes.Equal(der, want) {
+		t.Fatalf("got % X, want % X", der, want)
+	}
+}

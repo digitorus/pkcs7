@@ -100,3 +100,13 @@ func TestPad(t *testing.T) {
 		}
 	}
 }
+
+func TestPadDoesNotWriteIntoSpareCapacity(t *testing.T) {
+	backing := []byte{1, 2, 3, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA}
+	if _, err := pad(backing[:3], 8); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(backing[3:], []byte{0xAA, 0xAA, 0xAA, 0xAA, 0xAA}) {
+		t.Fatalf("pad modified the caller's backing array: % X", backing)
+	}
+}
