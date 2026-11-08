@@ -13,26 +13,30 @@ const maxNestingDepth = 500
 
 type asn1Object interface {
 	EncodeTo(writer *bytes.Buffer) error
+	encodedLen() int
 }
 
 type asn1Structured struct {
 	tagBytes []byte
+	length   int // DER length of the encoded content
 	content  []asn1Object
 }
 
 func (s asn1Structured) EncodeTo(out *bytes.Buffer) error {
 	// fmt.Printf("%s--> tag: % X\n", strings.Repeat("| ", encodeIndent), s.tagBytes)
-	inner := new(bytes.Buffer)
+	out.Write(s.tagBytes)
+	_ = encodeLength(out, s.length)
 	for _, obj := range s.content {
-		err := obj.EncodeTo(inner)
+		err := obj.EncodeTo(out)
 		if err != nil {
 			return err
 		}
 	}
-	out.Write(s.tagBytes)
-	_ = encodeLength(out, inner.Len())
-	out.Write(inner.Bytes())
 	return nil
+}
+
+func (s asn1Structured) encodedLen() int {
+	return derObjectLen(s.tagBytes, s.length)
 }
 
 type asn1Primitive struct {
@@ -56,17 +60,38 @@ func (p asn1Primitive) EncodeTo(out *bytes.Buffer) error {
 	return nil
 }
 
+func (p asn1Primitive) encodedLen() int {
+	return derObjectLen(p.tagBytes, p.length)
+}
+
+// derObjectLen returns the size of a DER object with the given tag and content length.
+func derObjectLen(tagBytes []byte, length int) int {
+	n := len(tagBytes) + 1 + length
+	if length >= 128 {
+		n += lengthLength(length)
+	}
+	return n
+}
+
 func ber2der(ber []byte) ([]byte, error) {
 	if len(ber) == 0 {
 		return nil, errors.New("ber2der: input ber is empty")
 	}
 	// fmt.Printf("--> ber2der: Transcoding %d bytes\n", len(ber))
-	out := new(bytes.Buffer)
-
+	// Already-DER input (the common case) is returned without copying. The
+	// result aliases ber, matching encoding/asn1 and crypto/x509 semantics.
+	end, isDER, err := derScan(ber, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	if isDER {
+		return ber[:end:end], nil
+	}
 	obj, _, err := readObject(ber, 0, 0)
 	if err != nil {
 		return nil, err
 	}
+	out := bytes.NewBuffer(make([]byte, 0, obj.encodedLen()))
 	_ = obj.EncodeTo(out)
 
 	return out.Bytes(), nil
@@ -130,19 +155,33 @@ func encodeLength(out *bytes.Buffer, length int) (err error) {
 	return
 }
 
-func readObject(ber []byte, offset, depth int) (asn1Object, int, error) {
+// berHeader describes the identifier and length octets of one BER object.
+type berHeader struct {
+	tagStart     int
+	tagEnd       int
+	contentStart int
+	length       int
+	constructed  bool
+	indefinite   bool
+	// canonical reports whether the length octets are already in DER form.
+	canonical bool
+}
+
+// readHeader parses and validates the identifier and length octets of the
+// object at offset without allocating on success.
+func readHeader(ber []byte, offset, depth int) (berHeader, error) {
 	if depth > maxNestingDepth {
-		return nil, 0, errors.New("ber2der: maximum nesting depth exceeded")
+		return berHeader{}, errors.New("ber2der: maximum nesting depth exceeded")
 	}
 	berLen := len(ber)
 	if offset >= berLen {
-		return nil, 0, errors.New("ber2der: offset is after end of ber data")
+		return berHeader{}, errors.New("ber2der: offset is after end of ber data")
 	}
 	tagStart := offset
 	b := ber[offset]
 	offset++
 	if offset >= berLen {
-		return nil, 0, errors.New("ber2der: cannot move offset forward, end of ber data reached")
+		return berHeader{}, errors.New("ber2der: cannot move offset forward, end of ber data reached")
 	}
 	tag := b & 0x1F // last 5 bits
 	if tag == 0x1F {
@@ -151,14 +190,14 @@ func readObject(ber []byte, offset, depth int) (asn1Object, int, error) {
 			tag = tag*128 + ber[offset] - 0x80
 			offset++
 			if offset >= berLen {
-				return nil, 0, errors.New("ber2der: cannot move offset forward, end of ber data reached")
+				return berHeader{}, errors.New("ber2der: cannot move offset forward, end of ber data reached")
 			}
 		}
 		// jvehent 20170227: this doesn't appear to be used anywhere...
 		// tag = tag*128 + ber[offset] - 0x80
 		offset++
 		if offset >= berLen {
-			return nil, 0, errors.New("ber2der: cannot move offset forward, end of ber data reached")
+			return berHeader{}, errors.New("ber2der: cannot move offset forward, end of ber data reached")
 		}
 	}
 	tagEnd := offset
@@ -177,25 +216,26 @@ func readObject(ber []byte, offset, depth int) (asn1Object, int, error) {
 		// if indefinite or multibyte length, we need to verify there is at least one more byte available
 		// otherwise we need to be flexible here for length == 0 conditions
 		// validation that the length is available is done after the length is correctly parsed
-		return nil, 0, errors.New("ber2der: cannot move offset forward, end of ber data reached")
+		return berHeader{}, errors.New("ber2der: cannot move offset forward, end of ber data reached")
 	}
 	indefinite := false
+	canonical := true
 	if l > 0x80 {
 		numberOfBytes := int(l & 0x7F)
 		if numberOfBytes > 4 { // int is only guaranteed to be 32bit
-			return nil, 0, errors.New("ber2der: BER tag length too long")
+			return berHeader{}, errors.New("ber2der: BER tag length too long")
 		}
 		if numberOfBytes == 4 && int(ber[offset]) > 0x7F {
-			return nil, 0, errors.New("ber2der: BER tag length is negative")
+			return berHeader{}, errors.New("ber2der: BER tag length is negative")
 		}
 		if offset+numberOfBytes > berLen {
 			// == condition is not checked here, this allows for a more descreptive error when the parsed length is
 			// compared with the remaining available bytes (`contentEnd > berLen`)
-			return nil, 0, errors.New("ber2der: cannot move offset forward, end of ber data reached")
+			return berHeader{}, errors.New("ber2der: cannot move offset forward, end of ber data reached")
 		}
 		if int(ber[offset]) == 0x0 && (numberOfBytes == 1 || ber[offset+1] <= 0x7F) {
 			// `numberOfBytes == 1` is an important conditional to avoid a potential out of bounds panic with `ber[offset+1]`
-			return nil, 0, errors.New("ber2der: BER tag length has leading zero")
+			return berHeader{}, errors.New("ber2der: BER tag length has leading zero")
 		}
 		debugprint("--> (compute length) indicator byte: %x\n", l)
 		// debugprint("--> (compute length) length bytes: %x\n", ber[offset:offset+numberOfBytes])
@@ -203,27 +243,71 @@ func readObject(ber []byte, offset, depth int) (asn1Object, int, error) {
 			length = length*256 + int(ber[offset])
 			offset++
 		}
+		canonical = length >= 128 && numberOfBytes == lengthLength(length)
 	} else if l == 0x80 {
 		indefinite = true
+		canonical = false
 	} else {
 		length = int(l)
 	}
 	if length < 0 {
-		return nil, 0, errors.New("ber2der: invalid negative value found in BER tag length")
+		return berHeader{}, errors.New("ber2der: invalid negative value found in BER tag length")
 	}
 	// fmt.Printf("--> length        : %d\n", length)
 	if length > berLen-offset {
-		return nil, 0, errors.New("ber2der: BER tag length is more than available data")
+		return berHeader{}, errors.New("ber2der: BER tag length is more than available data")
 	}
-	contentEnd := offset + length
 	debugprint("--> content start : %d\n", offset)
-	debugprint("--> content end   : %d\n", contentEnd)
+	debugprint("--> content end   : %d\n", offset+length)
 	// debugprint("--> content       : %x\n", ber[offset:contentEnd])
-	var obj asn1Object
 	if indefinite && kind == 0 {
-		return nil, 0, errors.New("ber2der: Indefinite form tag must have constructed encoding")
+		return berHeader{}, errors.New("ber2der: Indefinite form tag must have constructed encoding")
 	}
-	if kind == 0 {
+	return berHeader{
+		tagStart:     tagStart,
+		tagEnd:       tagEnd,
+		contentStart: offset,
+		length:       length,
+		constructed:  kind != 0,
+		indefinite:   indefinite,
+		canonical:    canonical,
+	}, nil
+}
+
+// derScan walks the object at offset without allocating. It reports the end
+// of the object and whether it is already DER encoded, in which case
+// transcoding would reproduce the input unchanged. It stops at the first
+// non-DER length so that readObject reports errors in the same order.
+func derScan(ber []byte, offset, depth int) (int, bool, error) {
+	h, err := readHeader(ber, offset, depth)
+	if err != nil || !h.canonical {
+		return 0, false, err
+	}
+	contentEnd := h.contentStart + h.length
+	if h.constructed {
+		ber = ber[:contentEnd]
+		offset = h.contentStart
+		for offset < contentEnd {
+			var ok bool
+			offset, ok, err = derScan(ber, offset, depth+1)
+			if err != nil || !ok {
+				return 0, false, err
+			}
+		}
+	}
+	return contentEnd, true, nil
+}
+
+func readObject(ber []byte, offset, depth int) (asn1Object, int, error) {
+	h, err := readHeader(ber, offset, depth)
+	if err != nil {
+		return nil, 0, err
+	}
+	tagStart, tagEnd, indefinite, length := h.tagStart, h.tagEnd, h.indefinite, h.length
+	offset = h.contentStart
+	contentEnd := offset + length
+	var obj asn1Object
+	if !h.constructed {
 		obj = asn1Primitive{
 			tagBytes: ber[tagStart:tagEnd],
 			length:   length,
@@ -231,6 +315,7 @@ func readObject(ber []byte, offset, depth int) (asn1Object, int, error) {
 		}
 	} else {
 		var subObjects []asn1Object
+		subObjectsLen := 0
 		// Restrict every descendant, including indefinite-length children, to
 		// this object's content before parsing it. A check after recursion
 		// would allow work on bytes outside the parent before rejecting them.
@@ -254,9 +339,11 @@ func readObject(ber []byte, offset, depth int) (asn1Object, int, error) {
 				return nil, 0, err
 			}
 			subObjects = append(subObjects, subObj)
+			subObjectsLen += subObj.encodedLen()
 		}
 		obj = asn1Structured{
 			tagBytes: ber[tagStart:tagEnd],
+			length:   subObjectsLen,
 			content:  subObjects,
 		}
 	}

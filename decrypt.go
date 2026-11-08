@@ -89,18 +89,24 @@ func (eci encryptedContentInfo) decrypt(key []byte) ([]byte, error) {
 	// or _be_ a tagged OCTET STRING
 	var cyphertext []byte
 	if eci.EncryptedContent.IsCompound {
-		// Complex case to concat all of the children OCTET STRINGs
-		var buf bytes.Buffer
+		// Complex case to concat all of the children OCTET STRINGs. A single
+		// child, which is what Encrypt produces, is used without copying.
+		var parts [][]byte
 		cypherbytes := eci.EncryptedContent.Bytes
 		for {
-			var part []byte
-			cypherbytes, _ = asn1.Unmarshal(cypherbytes, &part)
-			buf.Write(part)
-			if cypherbytes == nil {
+			var part asn1.RawValue
+			var err error
+			cypherbytes, err = asn1.Unmarshal(cypherbytes, &part)
+			if err != nil || part.Class != asn1.ClassUniversal || part.Tag != asn1.TagOctetString || part.IsCompound {
 				break
 			}
+			parts = append(parts, part.Bytes)
 		}
-		cyphertext = buf.Bytes()
+		if len(parts) == 1 {
+			cyphertext = parts[0]
+		} else {
+			cyphertext = bytes.Join(parts, nil)
+		}
 	} else {
 		// Simple case, the bytes _are_ the cyphertext
 		cyphertext = eci.EncryptedContent.Bytes
