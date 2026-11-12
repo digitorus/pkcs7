@@ -151,6 +151,9 @@ func verifySignatureAtTime(p7 *PKCS7, signer signerInfo, opts x509.VerifyOptions
 			return fmt.Errorf("pkcs7: failed to verify certificate chain: %v", err)
 		}
 	}
+	if algorithm, ok := compositeAlgorithmForOID(signer.DigestEncryptionAlgorithm.Algorithm); ok {
+		return verifyCompositeSignature(p7, ee, signer, signedData, algorithm)
+	}
 	sigalg, err := getSignatureAlgorithm(signer.DigestEncryptionAlgorithm, signer.DigestAlgorithm)
 	if err != nil {
 		return err
@@ -206,6 +209,9 @@ func verifySignature(p7 *PKCS7, signer signerInfo, opts x509.VerifyOptions) (err
 		if err != nil {
 			return fmt.Errorf("pkcs7: failed to verify certificate chain: %v", err)
 		}
+	}
+	if algorithm, ok := compositeAlgorithmForOID(signer.DigestEncryptionAlgorithm.Algorithm); ok {
+		return verifyCompositeSignature(p7, ee, signer, signedData, algorithm)
 	}
 	sigalg, err := getSignatureAlgorithm(signer.DigestEncryptionAlgorithm, signer.DigestAlgorithm)
 	if err != nil {
