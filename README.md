@@ -146,4 +146,5 @@ func SignAndDetach(content []byte, cert *x509.Certificate, privkey *rsa.PrivateK
 
 ## Credits
 
-This is a fork of [fullsailor/pkcs7](https://github.com/fullsailor/pkcs7)
+This is a fork of
+[mozilla-services/pkcs7](https://github.com/mozilla-services/pkcs7)
