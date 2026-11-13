@@ -209,6 +209,24 @@ func TestCompositeVerify(t *testing.T) {
 									}
 								}
 							}},
+							mutation{"wrong-attribute-set-class", func(p *PKCS7) {
+								for i := range p.Signers[0].AuthenticatedAttributes {
+									attr := &p.Signers[0].AuthenticatedAttributes[i]
+									if attr.Type.Equal(OIDAttributeMessageDigest) {
+										attr.Value.Class = asn1.ClassContextSpecific
+										return
+									}
+								}
+							}},
+							mutation{"primitive-attribute-set", func(p *PKCS7) {
+								for i := range p.Signers[0].AuthenticatedAttributes {
+									attr := &p.Signers[0].AuthenticatedAttributes[i]
+									if attr.Type.Equal(OIDAttributeMessageDigest) {
+										attr.Value.IsCompound = false
+										return
+									}
+								}
+							}},
 						)
 					}
 					if !attrs {

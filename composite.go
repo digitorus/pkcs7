@@ -88,19 +88,33 @@ func verifyCompositeSignature(
 	if len(signer.AuthenticatedAttributes) > 0 {
 		var digestCount, typeCount int
 		for _, attr := range signer.AuthenticatedAttributes {
-			if attr.Type.Equal(OIDAttributeMessageDigest) ||
-				attr.Type.Equal(OIDAttributeContentType) {
-				// Each mandatory attribute has exactly one value.
-				var value asn1.RawValue
-				rest, err := asn1.Unmarshal(attr.Value.Bytes, &value)
-				if attr.Value.Tag != asn1.TagSet || err != nil || len(rest) != 0 {
-					return errors.New("pkcs7: malformed composite signed attribute")
-				}
+
+			isDigest := attr.Type.Equal(OIDAttributeMessageDigest)
+			isContentType := attr.Type.Equal(OIDAttributeContentType)
+			if !isDigest && !isContentType {
+				continue
 			}
+
+			if attr.Value.Class != asn1.ClassUniversal || attr.Value.Tag != asn1.TagSet || !attr.Value.IsCompound {
+				return errors.New("pkcs7: malformed composite signed attribute")
+			}
+
+			var value asn1.RawValue
+			rest, err := asn1.Unmarshal(attr.Value.Bytes, &value)
+			if err != nil || len(rest) != 0 || value.Class != asn1.ClassUniversal || value.IsCompound {
+				return errors.New("pkcs7: malformed composite signed attribute")
+			}
+
 			switch {
-			case attr.Type.Equal(OIDAttributeMessageDigest):
+			case isDigest:
+				if value.Tag != asn1.TagOctetString {
+					return errors.New("pkcs7: invalid message-digest attribute type")
+				}
 				digestCount++
-			case attr.Type.Equal(OIDAttributeContentType):
+			case isContentType:
+				if value.Tag != asn1.TagOID {
+					return errors.New("pkcs7: invalid content-type attribute type")
+				}
 				typeCount++
 			}
 		}
