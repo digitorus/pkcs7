@@ -151,14 +151,8 @@ func verifySignatureAtTime(p7 *PKCS7, signer signerInfo, opts x509.VerifyOptions
 			return fmt.Errorf("pkcs7: failed to verify certificate chain: %v", err)
 		}
 	}
-	if algorithm, ok := compositeAlgorithmForOID(signer.DigestEncryptionAlgorithm.Algorithm); ok {
-		return verifyCompositeSignature(p7, ee, signer, signedData, algorithm)
-	}
-	sigalg, err := getSignatureAlgorithm(signer.DigestEncryptionAlgorithm, signer.DigestAlgorithm)
-	if err != nil {
-		return err
-	}
-	return ee.CheckSignature(sigalg, signedData, signer.EncryptedDigest)
+
+	return verifySignerSignature(p7, ee, signer, signedData)
 }
 
 func verifySignature(p7 *PKCS7, signer signerInfo, opts x509.VerifyOptions) (err error) {
@@ -210,14 +204,8 @@ func verifySignature(p7 *PKCS7, signer signerInfo, opts x509.VerifyOptions) (err
 			return fmt.Errorf("pkcs7: failed to verify certificate chain: %v", err)
 		}
 	}
-	if algorithm, ok := compositeAlgorithmForOID(signer.DigestEncryptionAlgorithm.Algorithm); ok {
-		return verifyCompositeSignature(p7, ee, signer, signedData, algorithm)
-	}
-	sigalg, err := getSignatureAlgorithm(signer.DigestEncryptionAlgorithm, signer.DigestAlgorithm)
-	if err != nil {
-		return err
-	}
-	return ee.CheckSignature(sigalg, signedData, signer.EncryptedDigest)
+
+	return verifySignerSignature(p7, ee, signer, signedData)
 }
 
 // GetOnlySigner returns an x509.Certificate for the first signer of the signed
@@ -452,6 +440,19 @@ func getCertFromCertsByIssuerAndSerial(certs []*x509.Certificate, ias issuerAndS
 		}
 	}
 	return nil
+}
+
+func verifySignerSignature(p7 *PKCS7, ee *x509.Certificate, signer signerInfo, signedData []byte) error {
+	if algorithm, ok := compositeAlgorithmForOID(signer.DigestEncryptionAlgorithm.Algorithm); ok {
+		return verifyCompositeSignature(p7, ee, signer, signedData, algorithm)
+	}
+
+	sigAlg, err := getSignatureAlgorithm(signer.DigestEncryptionAlgorithm, signer.DigestAlgorithm)
+	if err != nil {
+		return err
+	}
+
+	return ee.CheckSignature(sigAlg, signedData, signer.EncryptedDigest)
 }
 
 func unmarshalAttribute(attrs []attribute, attributeType asn1.ObjectIdentifier, out interface{}) error {
