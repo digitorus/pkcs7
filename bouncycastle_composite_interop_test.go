@@ -20,16 +20,23 @@ func TestBouncyCastleCompositeInteroperability(t *testing.T) {
 		t.Fatal("PKCS7_BOUNCY_CASTLE_CLASSPATH is required")
 	}
 
+	dir := t.TempDir()
+	contentPath := filepath.Join(dir, "content.bin")
 	content := []byte("Bouncy Castle and Go agree on RFC 10073 / RFC 10082 composite CMS")
+	writeTestFile(t, contentPath, content)
+
+	args := []string{"composite-sign-batch", contentPath, dir}
+	for _, algorithm := range compositeAlgorithms {
+		name := strings.TrimPrefix(algorithm.label, "COMPSIG-")
+		args = append(args, name)
+	}
+	runBouncyCastleCommand(t, classpath, args...)
+
 	for _, algorithm := range compositeAlgorithms {
 		name := strings.TrimPrefix(algorithm.label, "COMPSIG-")
 
 		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
-			contentPath := filepath.Join(dir, "content.bin")
-			writeTestFile(t, contentPath, content)
-
-			runBouncyCastleCommand(t, classpath, "composite-sign", name, contentPath, dir)
+			dir := filepath.Join(dir, name)
 
 			issuerDER, err := os.ReadFile(filepath.Join(dir, "issuer.der"))
 			if err != nil {

@@ -87,14 +87,26 @@ public final class BouncyCastleInterop {
                 if (args.length != 4) {
                     throw new IllegalArgumentException("composite-sign requires algorithm, content, and output directory");
                 }
-                signComposite(args[1], Path.of(args[2]), Path.of(args[3]));
+                signComposite(args[1], Path.of(args[2]), Path.of(args[3]), generateCompositeIssuerKey(), BigInteger.valueOf(2));
+                break;
+            case "composite-sign-batch":
+                if (args.length < 4) {
+                    throw new IllegalArgumentException("composite-sign-batch requires content, output directory, and algorithms");
+                }
+                Path contentPath = Path.of(args[1]);
+                Path outputDir = Path.of(args[2]);
+                KeyPair issuerKey = generateCompositeIssuerKey();
+                for (int i = 3; i < args.length; i++) {
+                    String algorithm = args[i];
+                    signComposite(algorithm, contentPath, outputDir.resolve(algorithm), issuerKey, BigInteger.valueOf(i - 1));
+                }
                 break;
             default:
                 throw new IllegalArgumentException("unknown command: " + args[0]);
         }
     }
 
-    private static void signComposite(String algorithm, Path contentPath, Path outputDir) throws Exception {
+    private static void signComposite(String algorithm, Path contentPath, Path outputDir, KeyPair issuerKey, BigInteger serial) throws Exception {
         Files.createDirectories(outputDir);
         byte[] content = Files.readAllBytes(contentPath);
 
@@ -103,11 +115,8 @@ public final class BouncyCastleInterop {
         SubjectPublicKeyInfo signerSPKI = SubjectPublicKeyInfo.getInstance(
             ASN1Primitive.fromByteArray(signerKey.getPublic().getEncoded()));
 
-        KeyPairGenerator issuerGenerator = KeyPairGenerator.getInstance("RSA");
-        issuerGenerator.initialize(2048);
-        KeyPair issuerKey = issuerGenerator.generateKeyPair();
         X509v3CertificateBuilder certificateBuilder = new X509v3CertificateBuilder(
-            new X500Name("CN=BC composite CMS test issuer"), BigInteger.ONE,
+            new X500Name("CN=BC composite CMS test issuer"), serial,
             Date.from(Instant.parse("2026-01-01T00:00:00Z")),
             Date.from(Instant.parse("2036-01-01T00:00:00Z")),
             new X500Name("CN=" + algorithm), signerSPKI);
@@ -122,12 +131,12 @@ public final class BouncyCastleInterop {
         );
 
         X500Name issuerName = new X500Name("CN=BC composite CMS test issuer");
-
+        Instant now = Instant.now();
         X509v3CertificateBuilder issuerBuilder = new X509v3CertificateBuilder(
             issuerName,
             BigInteger.valueOf(2),
-            Date.from(Instant.parse("2026-01-01T00:00:00Z")),
-            Date.from(Instant.parse("2036-01-01T00:00:00Z")),
+            Date.from(now.minusSeconds(24 * 60 * 60)),
+            Date.from(now.plusSeconds(365L * 24 * 60 * 60)),
             issuerName,
             issuerSPKI
         );
@@ -273,5 +282,11 @@ public final class BouncyCastleInterop {
     private static PrivateKey loadPrivateKey(Path keyPath, String algorithm) throws Exception {
         return KeyFactory.getInstance(algorithm, PROVIDER).generatePrivate(
             new PKCS8EncodedKeySpec(Files.readAllBytes(keyPath)));
+    }
+
+    private static KeyPair generateCompositeIssuerKey() throws Exception {
+        KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(2048);
+        return generator.generateKeyPair();
     }
 }
