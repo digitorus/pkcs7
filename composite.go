@@ -23,10 +23,11 @@ const (
 )
 
 type compositeAlgorithm struct {
-	arc         int
+	oid         asn1.ObjectIdentifier
 	label       string
 	ml          mldsa.Parameters
 	preHash     crypto.Hash
+	digestOID   asn1.ObjectIdentifier
 	traditional compositeTraditional
 	tradHash    crypto.Hash
 	bits        int
@@ -36,26 +37,176 @@ type compositeAlgorithm struct {
 // RFC 10073 Section 6.
 // Brainpool (47, 50) and Ed448 (51) are unsupported.
 var compositeAlgorithms = [...]compositeAlgorithm{
-	{37, "COMPSIG-MLDSA44-RSA2048-PSS-SHA256", mldsa.MLDSA44(), crypto.SHA256, compositePSS, crypto.SHA256, 2048, nil},
-	{38, "COMPSIG-MLDSA44-RSA2048-PKCS15-SHA256", mldsa.MLDSA44(), crypto.SHA256, compositePKCS1, crypto.SHA256, 2048, nil},
-	{39, "COMPSIG-MLDSA44-Ed25519-SHA512", mldsa.MLDSA44(), crypto.SHA512, compositeEd25519, 0, 0, nil},
-	{40, "COMPSIG-MLDSA44-ECDSA-P256-SHA256", mldsa.MLDSA44(), crypto.SHA256, compositeECDSA, crypto.SHA256, 0, elliptic.P256()},
-	{41, "COMPSIG-MLDSA65-RSA3072-PSS-SHA512", mldsa.MLDSA65(), crypto.SHA512, compositePSS, crypto.SHA256, 3072, nil},
-	{42, "COMPSIG-MLDSA65-RSA3072-PKCS15-SHA512", mldsa.MLDSA65(), crypto.SHA512, compositePKCS1, crypto.SHA256, 3072, nil},
-	{43, "COMPSIG-MLDSA65-RSA4096-PSS-SHA512", mldsa.MLDSA65(), crypto.SHA512, compositePSS, crypto.SHA384, 4096, nil},
-	{44, "COMPSIG-MLDSA65-RSA4096-PKCS15-SHA512", mldsa.MLDSA65(), crypto.SHA512, compositePKCS1, crypto.SHA384, 4096, nil},
-	{45, "COMPSIG-MLDSA65-ECDSA-P256-SHA512", mldsa.MLDSA65(), crypto.SHA512, compositeECDSA, crypto.SHA256, 0, elliptic.P256()},
-	{46, "COMPSIG-MLDSA65-ECDSA-P384-SHA512", mldsa.MLDSA65(), crypto.SHA512, compositeECDSA, crypto.SHA384, 0, elliptic.P384()},
-	{48, "COMPSIG-MLDSA65-Ed25519-SHA512", mldsa.MLDSA65(), crypto.SHA512, compositeEd25519, 0, 0, nil},
-	{49, "COMPSIG-MLDSA87-ECDSA-P384-SHA512", mldsa.MLDSA87(), crypto.SHA512, compositeECDSA, crypto.SHA384, 0, elliptic.P384()},
-	{52, "COMPSIG-MLDSA87-RSA3072-PSS-SHA512", mldsa.MLDSA87(), crypto.SHA512, compositePSS, crypto.SHA256, 3072, nil},
-	{53, "COMPSIG-MLDSA87-RSA4096-PSS-SHA512", mldsa.MLDSA87(), crypto.SHA512, compositePSS, crypto.SHA384, 4096, nil},
-	{54, "COMPSIG-MLDSA87-ECDSA-P521-SHA512", mldsa.MLDSA87(), crypto.SHA512, compositeECDSA, crypto.SHA512, 0, elliptic.P521()},
+	{
+		oid:         asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 37},
+		label:       "COMPSIG-MLDSA44-RSA2048-PSS-SHA256",
+		ml:          mldsa.MLDSA44(),
+		preHash:     crypto.SHA256,
+		digestOID:   OIDDigestAlgorithmSHA256,
+		traditional: compositePSS,
+		tradHash:    crypto.SHA256,
+		bits:        2048,
+		curve:       nil,
+	},
+	{
+		oid:         asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 38},
+		label:       "COMPSIG-MLDSA44-RSA2048-PKCS15-SHA256",
+		ml:          mldsa.MLDSA44(),
+		preHash:     crypto.SHA256,
+		digestOID:   OIDDigestAlgorithmSHA256,
+		traditional: compositePKCS1,
+		tradHash:    crypto.SHA256,
+		bits:        2048,
+		curve:       nil,
+	},
+	{
+		oid:         asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 39},
+		label:       "COMPSIG-MLDSA44-Ed25519-SHA512",
+		ml:          mldsa.MLDSA44(),
+		preHash:     crypto.SHA512,
+		digestOID:   OIDDigestAlgorithmSHA512,
+		traditional: compositeEd25519,
+		tradHash:    0,
+		bits:        0,
+		curve:       nil,
+	},
+	{
+		oid:         asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 40},
+		label:       "COMPSIG-MLDSA44-ECDSA-P256-SHA256",
+		ml:          mldsa.MLDSA44(),
+		preHash:     crypto.SHA256,
+		digestOID:   OIDDigestAlgorithmSHA256,
+		traditional: compositeECDSA,
+		tradHash:    crypto.SHA256,
+		bits:        0,
+		curve:       elliptic.P256(),
+	},
+	{
+		oid:         asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 41},
+		label:       "COMPSIG-MLDSA65-RSA3072-PSS-SHA512",
+		ml:          mldsa.MLDSA65(),
+		preHash:     crypto.SHA512,
+		digestOID:   OIDDigestAlgorithmSHA512,
+		traditional: compositePSS,
+		tradHash:    crypto.SHA256,
+		bits:        3072,
+		curve:       nil,
+	},
+	{
+		oid:         asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 42},
+		label:       "COMPSIG-MLDSA65-RSA3072-PKCS15-SHA512",
+		ml:          mldsa.MLDSA65(),
+		preHash:     crypto.SHA512,
+		digestOID:   OIDDigestAlgorithmSHA512,
+		traditional: compositePKCS1,
+		tradHash:    crypto.SHA256,
+		bits:        3072,
+		curve:       nil,
+	},
+	{
+		oid:         asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 43},
+		label:       "COMPSIG-MLDSA65-RSA4096-PSS-SHA512",
+		ml:          mldsa.MLDSA65(),
+		preHash:     crypto.SHA512,
+		digestOID:   OIDDigestAlgorithmSHA512,
+		traditional: compositePSS,
+		tradHash:    crypto.SHA384,
+		bits:        4096,
+		curve:       nil,
+	},
+	{
+		oid:         asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 44},
+		label:       "COMPSIG-MLDSA65-RSA4096-PKCS15-SHA512",
+		ml:          mldsa.MLDSA65(),
+		preHash:     crypto.SHA512,
+		digestOID:   OIDDigestAlgorithmSHA512,
+		traditional: compositePKCS1,
+		tradHash:    crypto.SHA384,
+		bits:        4096,
+		curve:       nil,
+	},
+	{
+		oid:         asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 45},
+		label:       "COMPSIG-MLDSA65-ECDSA-P256-SHA512",
+		ml:          mldsa.MLDSA65(),
+		preHash:     crypto.SHA512,
+		digestOID:   OIDDigestAlgorithmSHA512,
+		traditional: compositeECDSA,
+		tradHash:    crypto.SHA256,
+		bits:        0,
+		curve:       elliptic.P256(),
+	},
+	{
+		oid:         asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 46},
+		label:       "COMPSIG-MLDSA65-ECDSA-P384-SHA512",
+		ml:          mldsa.MLDSA65(),
+		preHash:     crypto.SHA512,
+		digestOID:   OIDDigestAlgorithmSHA512,
+		traditional: compositeECDSA,
+		tradHash:    crypto.SHA384,
+		bits:        0,
+		curve:       elliptic.P384(),
+	},
+	{
+		oid:         asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 48},
+		label:       "COMPSIG-MLDSA65-Ed25519-SHA512",
+		ml:          mldsa.MLDSA65(),
+		preHash:     crypto.SHA512,
+		digestOID:   OIDDigestAlgorithmSHA512,
+		traditional: compositeEd25519,
+		tradHash:    0,
+		bits:        0,
+		curve:       nil,
+	},
+	{
+		oid:         asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 49},
+		label:       "COMPSIG-MLDSA87-ECDSA-P384-SHA512",
+		ml:          mldsa.MLDSA87(),
+		preHash:     crypto.SHA512,
+		digestOID:   OIDDigestAlgorithmSHA512,
+		traditional: compositeECDSA,
+		tradHash:    crypto.SHA384,
+		bits:        0,
+		curve:       elliptic.P384(),
+	},
+	{
+		oid:         asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 52},
+		label:       "COMPSIG-MLDSA87-RSA3072-PSS-SHA512",
+		ml:          mldsa.MLDSA87(),
+		preHash:     crypto.SHA512,
+		digestOID:   OIDDigestAlgorithmSHA512,
+		traditional: compositePSS,
+		tradHash:    crypto.SHA256,
+		bits:        3072,
+		curve:       nil,
+	},
+	{
+		oid:         asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 53},
+		label:       "COMPSIG-MLDSA87-RSA4096-PSS-SHA512",
+		ml:          mldsa.MLDSA87(),
+		preHash:     crypto.SHA512,
+		digestOID:   OIDDigestAlgorithmSHA512,
+		traditional: compositePSS,
+		tradHash:    crypto.SHA384,
+		bits:        4096,
+		curve:       nil,
+	},
+	{
+		oid:         asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 54},
+		label:       "COMPSIG-MLDSA87-ECDSA-P521-SHA512",
+		ml:          mldsa.MLDSA87(),
+		preHash:     crypto.SHA512,
+		digestOID:   OIDDigestAlgorithmSHA512,
+		traditional: compositeECDSA,
+		tradHash:    crypto.SHA512,
+		bits:        0,
+		curve:       elliptic.P521(),
+	},
 }
 
 func compositeAlgorithmForOID(oid asn1.ObjectIdentifier) (compositeAlgorithm, bool) {
 	for _, algorithm := range compositeAlgorithms {
-		if oid.Equal(asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, algorithm.arc}) {
+		if oid.Equal(algorithm.oid) {
 			return algorithm, true
 		}
 	}
@@ -75,11 +226,7 @@ func verifyCompositeSignature(
 		return errors.New("pkcs7: composite CMS algorithm parameters must be absent")
 	}
 
-	digestOID := OIDDigestAlgorithmSHA512
-	if algorithm.preHash == crypto.SHA256 {
-		digestOID = OIDDigestAlgorithmSHA256
-	}
-	if !signer.DigestAlgorithm.Algorithm.Equal(digestOID) {
+	if !signer.DigestAlgorithm.Algorithm.Equal(algorithm.digestOID) {
 		return errors.New("pkcs7: composite CMS digest algorithm mismatch")
 	}
 

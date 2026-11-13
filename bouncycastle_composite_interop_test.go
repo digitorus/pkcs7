@@ -22,24 +22,24 @@ func TestBouncyCastleCompositeInteroperability(t *testing.T) {
 
 	algorithms := []struct {
 		name   string
-		arc    int
+		oid    asn1.ObjectIdentifier
 		sha256 bool
 	}{
-		{"MLDSA44-RSA2048-PSS-SHA256", 37, true},
-		{"MLDSA44-RSA2048-PKCS15-SHA256", 38, true},
-		{"MLDSA44-Ed25519-SHA512", 39, false},
-		{"MLDSA44-ECDSA-P256-SHA256", 40, true},
-		{"MLDSA65-RSA3072-PSS-SHA512", 41, false},
-		{"MLDSA65-RSA3072-PKCS15-SHA512", 42, false},
-		{"MLDSA65-RSA4096-PSS-SHA512", 43, false},
-		{"MLDSA65-RSA4096-PKCS15-SHA512", 44, false},
-		{"MLDSA65-ECDSA-P256-SHA512", 45, false},
-		{"MLDSA65-ECDSA-P384-SHA512", 46, false},
-		{"MLDSA65-Ed25519-SHA512", 48, false},
-		{"MLDSA87-ECDSA-P384-SHA512", 49, false},
-		{"MLDSA87-RSA3072-PSS-SHA512", 52, false},
-		{"MLDSA87-RSA4096-PSS-SHA512", 53, false},
-		{"MLDSA87-ECDSA-P521-SHA512", 54, false},
+		{"MLDSA44-RSA2048-PSS-SHA256", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 37}, true},
+		{"MLDSA44-RSA2048-PKCS15-SHA256", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 38}, true},
+		{"MLDSA44-Ed25519-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 39}, false},
+		{"MLDSA44-ECDSA-P256-SHA256", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 40}, true},
+		{"MLDSA65-RSA3072-PSS-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 41}, false},
+		{"MLDSA65-RSA3072-PKCS15-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 42}, false},
+		{"MLDSA65-RSA4096-PSS-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 43}, false},
+		{"MLDSA65-RSA4096-PKCS15-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 44}, false},
+		{"MLDSA65-ECDSA-P256-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 45}, false},
+		{"MLDSA65-ECDSA-P384-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 46}, false},
+		{"MLDSA65-Ed25519-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 48}, false},
+		{"MLDSA87-ECDSA-P384-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 49}, false},
+		{"MLDSA87-RSA3072-PSS-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 52}, false},
+		{"MLDSA87-RSA4096-PSS-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 53}, false},
+		{"MLDSA87-ECDSA-P521-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 54}, false},
 	}
 
 	content := []byte("Bouncy Castle and Go agree on RFC 10073 / RFC 10082 composite CMS")
@@ -80,10 +80,9 @@ func TestBouncyCastleCompositeInteroperability(t *testing.T) {
 									len(p7.Signers), len(p7.Certificates))
 							}
 							signer := p7.Signers[0]
-							wantOID := asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, algorithm.arc}
-							if !signer.DigestEncryptionAlgorithm.Algorithm.Equal(wantOID) {
+							if !signer.DigestEncryptionAlgorithm.Algorithm.Equal(algorithm.oid) {
 								t.Fatalf("signature OID = %s; want %s",
-									signer.DigestEncryptionAlgorithm.Algorithm, wantOID)
+									signer.DigestEncryptionAlgorithm.Algorithm, algorithm.oid)
 							}
 							wantDigest := OIDDigestAlgorithmSHA512
 							if algorithm.sha256 {
