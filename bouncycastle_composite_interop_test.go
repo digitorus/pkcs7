@@ -3,10 +3,10 @@ package pkcs7
 import (
 	"bytes"
 	"crypto/x509"
-	"encoding/asn1"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -20,36 +20,16 @@ func TestBouncyCastleCompositeInteroperability(t *testing.T) {
 		t.Fatal("PKCS7_BOUNCY_CASTLE_CLASSPATH is required")
 	}
 
-	algorithms := []struct {
-		name   string
-		oid    asn1.ObjectIdentifier
-		sha256 bool
-	}{
-		{"MLDSA44-RSA2048-PSS-SHA256", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 37}, true},
-		{"MLDSA44-RSA2048-PKCS15-SHA256", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 38}, true},
-		{"MLDSA44-Ed25519-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 39}, false},
-		{"MLDSA44-ECDSA-P256-SHA256", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 40}, true},
-		{"MLDSA65-RSA3072-PSS-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 41}, false},
-		{"MLDSA65-RSA3072-PKCS15-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 42}, false},
-		{"MLDSA65-RSA4096-PSS-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 43}, false},
-		{"MLDSA65-RSA4096-PKCS15-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 44}, false},
-		{"MLDSA65-ECDSA-P256-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 45}, false},
-		{"MLDSA65-ECDSA-P384-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 46}, false},
-		{"MLDSA65-Ed25519-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 48}, false},
-		{"MLDSA87-ECDSA-P384-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 49}, false},
-		{"MLDSA87-RSA3072-PSS-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 52}, false},
-		{"MLDSA87-RSA4096-PSS-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 53}, false},
-		{"MLDSA87-ECDSA-P521-SHA512", asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, 54}, false},
-	}
-
 	content := []byte("Bouncy Castle and Go agree on RFC 10073 / RFC 10082 composite CMS")
-	for _, algorithm := range algorithms {
-		t.Run(algorithm.name, func(t *testing.T) {
+	for _, algorithm := range compositeAlgorithms {
+		name := strings.TrimPrefix(algorithm.label, "COMPSIG-")
+
+		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			contentPath := filepath.Join(dir, "content.bin")
 			writeTestFile(t, contentPath, content)
 
-			runBouncyCastleCommand(t, classpath, "composite-sign", algorithm.name, contentPath, dir)
+			runBouncyCastleCommand(t, classpath, "composite-sign", name, contentPath, dir)
 
 			issuerDER, err := os.ReadFile(filepath.Join(dir, "issuer.der"))
 			if err != nil {
@@ -97,13 +77,10 @@ func TestBouncyCastleCompositeInteroperability(t *testing.T) {
 								t.Fatalf("signature OID = %s; want %s",
 									signer.DigestEncryptionAlgorithm.Algorithm, algorithm.oid)
 							}
-							wantDigest := OIDDigestAlgorithmSHA512
-							if algorithm.sha256 {
-								wantDigest = OIDDigestAlgorithmSHA256
-							}
-							if !signer.DigestAlgorithm.Algorithm.Equal(wantDigest) {
+
+							if !signer.DigestAlgorithm.Algorithm.Equal(algorithm.digestOID) {
 								t.Fatalf("CMS digest OID = %s; want %s",
-									signer.DigestAlgorithm.Algorithm, wantDigest)
+									signer.DigestAlgorithm.Algorithm, algorithm.digestOID)
 							}
 							if (len(signer.AuthenticatedAttributes) == 0) != direct {
 								t.Fatalf("unexpected signed attribute presence: direct=%t", direct)

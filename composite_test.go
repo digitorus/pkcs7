@@ -2,7 +2,6 @@ package pkcs7
 
 import (
 	"bytes"
-	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/mldsa"
@@ -25,11 +24,7 @@ func TestCompositeVerify(t *testing.T) {
 
 	msg := []byte("Composite ML-DSA CMS verification")
 	rsaKeys := map[int]*rsa.PrivateKey{}
-	for _, arc := range []int{37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 48, 49, 52, 53, 54} {
-		a, ok := compositeAlgorithmForOID(asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, arc})
-		if !ok {
-			t.Fatalf("missing OID arc %d", arc)
-		}
+	for _, a := range compositeAlgorithms {
 		t.Run(a.label, func(t *testing.T) {
 			pq, err := mldsa.GenerateKey(a.ml)
 			if err != nil {
@@ -89,10 +84,9 @@ func TestCompositeVerify(t *testing.T) {
 			}
 
 			pub := append(append([]byte{}, pq.PublicKey().Bytes()...), tradKey...)
-			oid := asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, arc}
 			spki, err := asn1.Marshal(subjectPublicKeyInfo{
 				Algorithm: pkix.AlgorithmIdentifier{
-					Algorithm: oid,
+					Algorithm: a.oid,
 				},
 				PublicKey: asn1.BitString{
 					Bytes:     pub,
@@ -119,13 +113,10 @@ func TestCompositeVerify(t *testing.T) {
 						raw: signedData{ContentInfo: contentInfo{ContentType: OIDData}}}
 					sign := signerInfo{
 						IssuerAndSerialNumber:     issuerAndSerial{IssuerName: asn1.RawValue{FullBytes: cert.RawIssuer}, SerialNumber: cert.SerialNumber},
-						DigestEncryptionAlgorithm: pkix.AlgorithmIdentifier{Algorithm: oid},
+						DigestEncryptionAlgorithm: pkix.AlgorithmIdentifier{Algorithm: a.oid},
+						DigestAlgorithm:           pkix.AlgorithmIdentifier{Algorithm: a.digestOID},
 					}
-					if a.preHash == crypto.SHA256 {
-						sign.DigestAlgorithm.Algorithm = OIDDigestAlgorithmSHA256
-					} else {
-						sign.DigestAlgorithm.Algorithm = OIDDigestAlgorithmSHA512
-					}
+
 					toSign := msg
 					if attrs {
 						h := a.preHash.New()
@@ -178,7 +169,7 @@ func TestCompositeVerify(t *testing.T) {
 							)
 
 							spki, err := asn1.Marshal(subjectPublicKeyInfo{
-								Algorithm: pkix.AlgorithmIdentifier{Algorithm: oid},
+								Algorithm: pkix.AlgorithmIdentifier{Algorithm: a.oid},
 								PublicKey: asn1.BitString{
 									Bytes:     pub,
 									BitLength: len(pub) * 8,
@@ -230,10 +221,10 @@ func TestCompositeVerify(t *testing.T) {
 							p.Signers[0].EncryptedDigest = p.Signers[0].EncryptedDigest[:a.ml.SignatureSize()-1]
 						}},
 						{"wrong-digest-oid", func(_ *testing.T, p *PKCS7) {
-							if a.preHash == crypto.SHA256 {
-								p.Signers[0].DigestAlgorithm.Algorithm = OIDDigestAlgorithmSHA512
-							} else {
+							if p.Signers[0].DigestAlgorithm.Algorithm.Equal(OIDDigestAlgorithmSHA512) {
 								p.Signers[0].DigestAlgorithm.Algorithm = OIDDigestAlgorithmSHA256
+							} else {
+								p.Signers[0].DigestAlgorithm.Algorithm = OIDDigestAlgorithmSHA512
 							}
 						}},
 						{"signature-parameters-null", func(_ *testing.T, p *PKCS7) { p.Signers[0].DigestEncryptionAlgorithm.Parameters = asn1.NullRawValue }},
@@ -244,11 +235,11 @@ func TestCompositeVerify(t *testing.T) {
 							p.Certificates = []*x509.Certificate{&badCert}
 						}},
 						{"signature-oid-key-mismatch", func(_ *testing.T, p *PKCS7) {
-							other := 38
-							if arc == 38 {
-								other = 37
+							other := compositeAlgorithms[0].oid
+							if a.oid.Equal(other) {
+								other = compositeAlgorithms[1].oid
 							}
-							p.Signers[0].DigestEncryptionAlgorithm.Algorithm = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, other}
+							p.Signers[0].DigestEncryptionAlgorithm.Algorithm = other
 						}},
 					}
 					if attrs {
