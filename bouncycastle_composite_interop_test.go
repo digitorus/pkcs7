@@ -51,6 +51,19 @@ func TestBouncyCastleCompositeInteroperability(t *testing.T) {
 
 			runBouncyCastleCommand(t, classpath, "composite-sign", algorithm.name, contentPath, dir)
 
+			issuerDER, err := os.ReadFile(filepath.Join(dir, "issuer.der"))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			issuerCert, err := x509.ParseCertificate(issuerDER)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			roots := x509.NewCertPool()
+			roots.AddCert(issuerCert)
+
 			for _, detached := range []bool{false, true} {
 				for _, direct := range []bool{false, true} {
 					name := interopCaseName(detached, direct)
@@ -65,7 +78,7 @@ func TestBouncyCastleCompositeInteroperability(t *testing.T) {
 						}
 						cmsPath := filepath.Join(dir, fmt.Sprintf("%s-%s.der", contentMode, attributeMode))
 
-						load := func() *PKCS7 {
+						load := func(t *testing.T) *PKCS7 {
 							t.Helper()
 							der, err := os.ReadFile(cmsPath)
 							if err != nil {
@@ -106,9 +119,15 @@ func TestBouncyCastleCompositeInteroperability(t *testing.T) {
 							return p7
 						}
 
-						p7 := load()
+						p7 := load(t)
 						if err := p7.Verify(); err != nil {
 							t.Fatalf("Verify: %v", err)
+						}
+						if err := p7.VerifyWithChain(roots); err != nil {
+							t.Fatalf("VerifyWithChain: %v", err)
+						}
+						if err := p7.VerifyWithChain(x509.NewCertPool()); err == nil {
+							t.Fatal("accepted composite signer with no trusted CA")
 						}
 						if err := p7.VerifyWithOpts(x509.VerifyOptions{
 							CurrentTime: time.Now(),
@@ -117,21 +136,21 @@ func TestBouncyCastleCompositeInteroperability(t *testing.T) {
 						}
 
 						t.Run("modified_content", func(t *testing.T) {
-							p7 := load()
+							p7 := load(t)
 							p7.Content[0] ^= 1
 							if err := p7.Verify(); err == nil {
 								t.Fatal("verified modified CMS content")
 							}
 						})
 						t.Run("modified_ml_dsa_signature", func(t *testing.T) {
-							p7 := load()
+							p7 := load(t)
 							p7.Signers[0].EncryptedDigest[0] ^= 1
 							if err := p7.Verify(); err == nil {
 								t.Fatal("verified corrupted ML-DSA component")
 							}
 						})
 						t.Run("modified_traditional_signature", func(t *testing.T) {
-							p7 := load()
+							p7 := load(t)
 							sig := p7.Signers[0].EncryptedDigest
 							sig[len(sig)-1] ^= 1
 							if err := p7.Verify(); err == nil {

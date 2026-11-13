@@ -117,6 +117,32 @@ public final class BouncyCastleInterop {
             .setProvider(PROVIDER).build(issuerKey.getPrivate());
         X509CertificateHolder signerCertificate = certificateBuilder.build(issuerSigner);
 
+        SubjectPublicKeyInfo issuerSPKI = SubjectPublicKeyInfo.getInstance(
+            ASN1Primitive.fromByteArray(issuerKey.getPublic().getEncoded())
+        );
+
+        X500Name issuerName = new X500Name("CN=BC composite CMS test issuer");
+
+        X509v3CertificateBuilder issuerBuilder = new X509v3CertificateBuilder(
+            issuerName,
+            BigInteger.valueOf(2),
+            Date.from(Instant.parse("2026-01-01T00:00:00Z")),
+            Date.from(Instant.parse("2036-01-01T00:00:00Z")),
+            issuerName,
+            issuerSPKI
+        );
+
+        issuerBuilder.addExtension(Extension.basicConstraints, true, new BasicConstraints(true));
+        issuerBuilder.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.keyCertSign | KeyUsage.cRLSign));
+
+        ContentSigner caSigner = new JcaContentSignerBuilder("SHA256withRSA")
+            .setProvider(PROVIDER)
+            .build(issuerKey.getPrivate());
+
+        X509CertificateHolder issuerCertificate = issuerBuilder.build(caSigner);
+
+        Files.write(outputDir.resolve("issuer.der"), issuerCertificate.getEncoded());
+
         for (boolean detached : new boolean[]{false, true}) {
             for (boolean direct : new boolean[]{false, true}) {
                 ContentSigner contentSigner = new JcaContentSignerBuilder(algorithm)

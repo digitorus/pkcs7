@@ -12,6 +12,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 )
@@ -163,31 +164,86 @@ func TestCompositeVerify(t *testing.T) {
 					if err := cms.VerifyWithOpts(x509.VerifyOptions{CurrentTime: time.Now()}); err != nil {
 						t.Fatalf("VerifyWithOpts(CurrentTime): %v", err)
 					}
+
+					// RSA specific test.
+					if a.traditional == compositePSS && a.bits == 3072 {
+						t.Run("rsa-modulus-mismatch", func(t *testing.T) {
+							wrongKey, err := rsa.GenerateKey(rand.Reader, 2048)
+							if err != nil {
+								t.Fatal(err)
+							}
+							pub := append(
+								bytes.Clone(pq.PublicKey().Bytes()),
+								x509.MarshalPKCS1PublicKey(&wrongKey.PublicKey)...,
+							)
+
+							spki, err := asn1.Marshal(subjectPublicKeyInfo{
+								Algorithm: pkix.AlgorithmIdentifier{Algorithm: oid},
+								PublicKey: asn1.BitString{
+									Bytes:     pub,
+									BitLength: len(pub) * 8,
+								},
+							})
+							if err != nil {
+								t.Fatal(err)
+							}
+
+							badCert := *cert
+							badCert.RawSubjectPublicKeyInfo = spki
+
+							bad := *cms
+							bad.Certificates = []*x509.Certificate{&badCert}
+
+							// The ML-DSA component should pass; the RSA
+							// modulus validation must specifically fail.
+							for _, verify := range []struct {
+								name string
+								fn   func() error
+							}{
+								{"Verify", bad.Verify},
+								{"VerifyWithOpts", func() error {
+									return bad.VerifyWithOpts(x509.VerifyOptions{
+										CurrentTime: time.Now(),
+									})
+								}},
+							} {
+								t.Run(verify.name, func(t *testing.T) {
+									err := verify.fn()
+									if err == nil || !strings.Contains(err.Error(), "invalid composite RSA key") {
+										t.Fatalf("expected RSA modulus mismatch, got: %v", err)
+									}
+								})
+							}
+						})
+					}
+
 					// Mutations must fail even when the other component remains valid.
 					type mutation struct {
 						name   string
-						mutate func(*PKCS7)
+						mutate func(*testing.T, *PKCS7)
 					}
 					tests := []mutation{
-						{"changed-content", func(p *PKCS7) { p.Content[0] ^= 1 }},
-						{"bad-ml-dsa", func(p *PKCS7) { p.Signers[0].EncryptedDigest[0] ^= 1 }},
-						{"bad-traditional", func(p *PKCS7) { p.Signers[0].EncryptedDigest[len(p.Signers[0].EncryptedDigest)-1] ^= 1 }},
-						{"truncated-signature", func(p *PKCS7) { p.Signers[0].EncryptedDigest = p.Signers[0].EncryptedDigest[:a.ml.SignatureSize()-1] }},
-						{"wrong-digest-oid", func(p *PKCS7) {
+						{"changed-content", func(_ *testing.T, p *PKCS7) { p.Content[0] ^= 1 }},
+						{"bad-ml-dsa", func(_ *testing.T, p *PKCS7) { p.Signers[0].EncryptedDigest[0] ^= 1 }},
+						{"bad-traditional", func(_ *testing.T, p *PKCS7) { p.Signers[0].EncryptedDigest[len(p.Signers[0].EncryptedDigest)-1] ^= 1 }},
+						{"truncated-signature", func(_ *testing.T, p *PKCS7) {
+							p.Signers[0].EncryptedDigest = p.Signers[0].EncryptedDigest[:a.ml.SignatureSize()-1]
+						}},
+						{"wrong-digest-oid", func(_ *testing.T, p *PKCS7) {
 							if a.preHash == crypto.SHA256 {
 								p.Signers[0].DigestAlgorithm.Algorithm = OIDDigestAlgorithmSHA512
 							} else {
 								p.Signers[0].DigestAlgorithm.Algorithm = OIDDigestAlgorithmSHA256
 							}
 						}},
-						{"signature-parameters-null", func(p *PKCS7) { p.Signers[0].DigestEncryptionAlgorithm.Parameters = asn1.NullRawValue }},
-						{"digest-parameters-null", func(p *PKCS7) { p.Signers[0].DigestAlgorithm.Parameters = asn1.NullRawValue }},
-						{"malformed-spki", func(p *PKCS7) {
+						{"signature-parameters-null", func(_ *testing.T, p *PKCS7) { p.Signers[0].DigestEncryptionAlgorithm.Parameters = asn1.NullRawValue }},
+						{"digest-parameters-null", func(_ *testing.T, p *PKCS7) { p.Signers[0].DigestAlgorithm.Parameters = asn1.NullRawValue }},
+						{"malformed-spki", func(_ *testing.T, p *PKCS7) {
 							badCert := *cert
 							badCert.RawSubjectPublicKeyInfo = []byte{0x00}
 							p.Certificates = []*x509.Certificate{&badCert}
 						}},
-						{"signature-oid-key-mismatch", func(p *PKCS7) {
+						{"signature-oid-key-mismatch", func(_ *testing.T, p *PKCS7) {
 							other := 38
 							if arc == 38 {
 								other = 37
@@ -197,7 +253,7 @@ func TestCompositeVerify(t *testing.T) {
 					}
 					if attrs {
 						tests = append(tests,
-							mutation{"missing-content-type", func(p *PKCS7) {
+							mutation{"missing-content-type", func(_ *testing.T, p *PKCS7) {
 								var filtered []attribute
 								for _, attr := range p.Signers[0].AuthenticatedAttributes {
 									if !attr.Type.Equal(OIDAttributeContentType) {
@@ -206,7 +262,7 @@ func TestCompositeVerify(t *testing.T) {
 								}
 								p.Signers[0].AuthenticatedAttributes = filtered
 							}},
-							mutation{"duplicate-message-digest", func(p *PKCS7) {
+							mutation{"duplicate-message-digest", func(_ *testing.T, p *PKCS7) {
 								for _, attr := range p.Signers[0].AuthenticatedAttributes {
 									if attr.Type.Equal(OIDAttributeMessageDigest) {
 										p.Signers[0].AuthenticatedAttributes = append(p.Signers[0].AuthenticatedAttributes, attr)
@@ -214,7 +270,7 @@ func TestCompositeVerify(t *testing.T) {
 									}
 								}
 							}},
-							mutation{"wrong-attribute-set-class", func(p *PKCS7) {
+							mutation{"wrong-attribute-set-class", func(_ *testing.T, p *PKCS7) {
 								for i := range p.Signers[0].AuthenticatedAttributes {
 									attr := &p.Signers[0].AuthenticatedAttributes[i]
 									if attr.Type.Equal(OIDAttributeMessageDigest) {
@@ -223,11 +279,52 @@ func TestCompositeVerify(t *testing.T) {
 									}
 								}
 							}},
-							mutation{"primitive-attribute-set", func(p *PKCS7) {
+							mutation{"primitive-attribute-set", func(_ *testing.T, p *PKCS7) {
 								for i := range p.Signers[0].AuthenticatedAttributes {
 									attr := &p.Signers[0].AuthenticatedAttributes[i]
 									if attr.Type.Equal(OIDAttributeMessageDigest) {
 										attr.Value.IsCompound = false
+										return
+									}
+								}
+							}},
+							mutation{"content-type-mismatch", func(t *testing.T, p *PKCS7) {
+								for i := range p.Signers[0].AuthenticatedAttributes {
+									attr := &p.Signers[0].AuthenticatedAttributes[i]
+
+									if attr.Type.Equal(OIDAttributeContentType) {
+										encoded, err := asn1.Marshal(idctTSTInfo)
+										if err != nil {
+											t.Fatal(err)
+										}
+
+										attr.Value.Bytes = encoded
+										return
+									}
+								}
+							}},
+							mutation{"multiple-digest-values", func(_ *testing.T, p *PKCS7) {
+								for i := range p.Signers[0].AuthenticatedAttributes {
+									attr := &p.Signers[0].AuthenticatedAttributes[i]
+
+									if attr.Type.Equal(OIDAttributeMessageDigest) {
+										attr.Value.Bytes = append(
+											bytes.Clone(attr.Value.Bytes),
+											attr.Value.Bytes...,
+										)
+										return
+									}
+								}
+							}},
+							mutation{"multiple-content-type-values", func(_ *testing.T, p *PKCS7) {
+								for i := range p.Signers[0].AuthenticatedAttributes {
+									attr := &p.Signers[0].AuthenticatedAttributes[i]
+
+									if attr.Type.Equal(OIDAttributeContentType) {
+										attr.Value.Bytes = append(
+											bytes.Clone(attr.Value.Bytes),
+											attr.Value.Bytes...,
+										)
 										return
 									}
 								}
@@ -237,7 +334,7 @@ func TestCompositeVerify(t *testing.T) {
 					if !attrs {
 						tests = append(tests, mutation{
 							name: "non-data-without-attributes",
-							mutate: func(p *PKCS7) {
+							mutate: func(_ *testing.T, p *PKCS7) {
 								sd := p.raw.(signedData)
 								sd.ContentInfo.ContentType = idctTSTInfo
 								p.raw = sd
@@ -245,17 +342,37 @@ func TestCompositeVerify(t *testing.T) {
 						})
 					}
 					for _, tc := range tests {
-						t.Run(tc.name, func(t *testing.T) {
-							bad := *cms
-							bad.Content = bytes.Clone(cms.Content)
-							bad.Signers = append([]signerInfo(nil), cms.Signers...)
-							bad.Signers[0].EncryptedDigest = bytes.Clone(cms.Signers[0].EncryptedDigest)
-							bad.Signers[0].AuthenticatedAttributes = append([]attribute(nil), cms.Signers[0].AuthenticatedAttributes...)
-							tc.mutate(&bad)
-							if err := bad.Verify(); err == nil {
-								t.Fatal("accepted invalid composite signature")
+						for _, timed := range []bool{false, true} {
+							name := tc.name
+							if timed {
+								name += "-at-time"
 							}
-						})
+
+							t.Run(name, func(t *testing.T) {
+								bad := *cms
+								bad.Content = bytes.Clone(cms.Content)
+								bad.Signers = append([]signerInfo(nil), cms.Signers...)
+								bad.Signers[0].EncryptedDigest =
+									bytes.Clone(cms.Signers[0].EncryptedDigest)
+								bad.Signers[0].AuthenticatedAttributes =
+									append([]attribute(nil), cms.Signers[0].AuthenticatedAttributes...)
+
+								tc.mutate(t, &bad)
+
+								var err error
+								if timed {
+									err = bad.VerifyWithOpts(x509.VerifyOptions{
+										CurrentTime: time.Now(),
+									})
+								} else {
+									err = bad.Verify()
+								}
+
+								if err == nil {
+									t.Fatal("accepted invalid composite signature")
+								}
+							})
+						}
 					}
 				})
 			}
