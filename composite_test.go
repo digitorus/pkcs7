@@ -20,6 +20,8 @@ import (
 // requiring support for producing composite-signed X.509 certificates.
 // The certificate is a minimal test stand-in with a genuine DER-encoded SPKI.
 func TestCompositeVerify(t *testing.T) {
+	var idctTSTInfo = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 16, 1, 4}
+
 	msg := []byte("Composite ML-DSA CMS verification")
 	rsaKeys := map[int]*rsa.PrivateKey{}
 	for _, arc := range []int{37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 48, 49, 52, 53, 54} {
@@ -208,6 +210,16 @@ func TestCompositeVerify(t *testing.T) {
 								}
 							}},
 						)
+					}
+					if !attrs {
+						tests = append(tests, mutation{
+							name: "non-data-without-attributes",
+							mutate: func(p *PKCS7) {
+								sd := p.raw.(signedData)
+								sd.ContentInfo.ContentType = idctTSTInfo
+								p.raw = sd
+							},
+						})
 					}
 					for _, tc := range tests {
 						t.Run(tc.name, func(t *testing.T) {

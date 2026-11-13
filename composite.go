@@ -120,6 +120,11 @@ func verifyCompositeSignature(
 		if !ok || !contentType.Equal(sd.ContentInfo.ContentType) {
 			return errors.New("pkcs7: composite content-type attribute mismatch")
 		}
+	} else {
+		sd, ok := p7.raw.(signedData)
+		if !ok || !sd.ContentInfo.ContentType.Equal(OIDData) {
+			return errors.New("pkcs7: composite signatures without signed attributes require id-data")
+		}
 	}
 
 	// Go's x509.Certificate.PublicKey is not decoded for unknown
