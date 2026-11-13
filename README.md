@@ -37,14 +37,14 @@ encrypted, err := pkcs7.Encrypt(content, recipients)
 
 AES-GCM is standardized for CMS `AuthEnvelopedData` by
 [RFC 5084](https://www.rfc-editor.org/rfc/rfc5084.html), not ordinary
-`EnvelopedData`. This package does not currently implement
-`AuthEnvelopedData`, so ML-KEM recipients reject AES-GCM content encryption.
+`EnvelopedData`. This package does not currently implement `AuthEnvelopedData`,
+so ML-KEM recipients reject AES-GCM content encryption.
 
 ML-KEM-512 is standardized but is not supported because Go 1.27's standard
 library provides only ML-KEM-768 and ML-KEM-1024. This package does not yet
 implement hybrid or composite KEM recipients. EnvelopedData encryption alone
-does not authenticate the originator; sign content when origin authentication
-is required.
+does not authenticate the originator; sign content when origin authentication is
+required.
 
 SLH-DSA is standardized for CMS by
 [RFC 9814](https://www.rfc-editor.org/rfc/rfc9814.html), but is not supported
@@ -54,18 +54,37 @@ implementation.
 Future work includes ML-KEM-512 when an appropriate Go implementation is
 available, CMS `AuthEnvelopedData`, CMS signed-attribute and EUF-CMA hardening,
 CMSAlgorithmProtection, SLH-DSA when an appropriate Go implementation is
-available, and composite ML-DSA or ML-KEM only after the relevant IETF
-specifications stabilize.
+available, and composite ML-KEM only after the relevant IETF specifications
+stabilize.
+
+CMS SignedData also supports verification of Composite ML-DSA signatures
+according to [RFC 10073](https://www.rfc-editor.org/rfc/rfc10073.html) and
+[RFC 10082](https://www.rfc-editor.org/rfc/rfc10082.html). The implementation
+supports 15 of the 18 standardized combinations, excluding Brainpool and Ed448
+due to limitations in Go's standard library. Composite signing is not currently
+supported but is planned.
+
+Composite signature verification does not extend Go's X.509 certificate chain
+verification. `VerifyWithChain` supports conventionally signed certificate
+chains, but cannot validate chains requiring composite certificate signature
+verification. This is also planned.
 
 ## Interoperability
 
-CI exercises CMS in both directions with OpenSSL 3.6 and 4.0 and Bouncy Castle
-1.85. SignedData coverage includes RSA, ECDSA, Ed25519, and all three ML-DSA
-parameter sets with embedded and detached content, with and without signed
-attributes where the external implementation supports those combinations.
-EnvelopedData coverage includes RSA key transport with AES-128-CBC and
-AES-256-CBC against OpenSSL, plus ML-KEM-768 and ML-KEM-1024 KEMRecipientInfo
-with AES-256-CBC against both OpenSSL and Bouncy Castle.
+CI exercises the existing non-composite CMS algorithms in both directions with
+OpenSSL 3.6 and 4.0 and Bouncy Castle 1.85. SignedData coverage includes RSA,
+ECDSA, Ed25519, and all three ML-DSA parameter sets with embedded and detached
+content, with and without signed attributes where the external implementation
+supports those combinations. EnvelopedData coverage includes RSA key transport
+with AES-128-CBC and AES-256-CBC against OpenSSL, plus ML-KEM-768 and
+ML-KEM-1024 KEMRecipientInfo with AES-256-CBC against both OpenSSL and Bouncy
+Castle.
+
+Composite ML-DSA interoperability testing covers Bouncy Castle-to-Go
+verification for all 15 supported combinations. Tests cover embedded and
+detached CMS content, with and without signed attributes. Go-to-Bouncy Castle
+interoperability is not yet supported because composite signing has not been
+implemented.
 
 ```go
 package main
@@ -125,7 +144,6 @@ func SignAndDetach(content []byte, cert *x509.Certificate, privkey *rsa.PrivateK
 }
 ```
 
-
-
 ## Credits
+
 This is a fork of [fullsailor/pkcs7](https://github.com/fullsailor/pkcs7)
