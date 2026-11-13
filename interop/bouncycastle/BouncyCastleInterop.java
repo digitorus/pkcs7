@@ -109,7 +109,8 @@ public final class BouncyCastleInterop {
     private static void signComposite(String algorithm, Path contentPath, Path outputDir, KeyPair issuerKey, BigInteger serial) throws Exception {
         Files.createDirectories(outputDir);
         byte[] content = Files.readAllBytes(contentPath);
-
+        
+        Instant now = Instant.now();
         KeyPairGenerator compositeGenerator = KeyPairGenerator.getInstance(algorithm, PROVIDER);
         KeyPair signerKey = compositeGenerator.generateKeyPair();
         SubjectPublicKeyInfo signerSPKI = SubjectPublicKeyInfo.getInstance(
@@ -117,8 +118,8 @@ public final class BouncyCastleInterop {
 
         X509v3CertificateBuilder certificateBuilder = new X509v3CertificateBuilder(
             new X500Name("CN=BC composite CMS test issuer"), serial,
-            Date.from(Instant.parse("2026-01-01T00:00:00Z")),
-            Date.from(Instant.parse("2036-01-01T00:00:00Z")),
+            Date.from(now.minusSeconds(24 * 60 * 60)),
+            Date.from(now.plusSeconds(365L * 24 * 60 * 60)),
             new X500Name("CN=" + algorithm), signerSPKI);
         certificateBuilder.addExtension(Extension.basicConstraints, true, new BasicConstraints(false));
         certificateBuilder.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.digitalSignature));
@@ -131,7 +132,6 @@ public final class BouncyCastleInterop {
         );
 
         X500Name issuerName = new X500Name("CN=BC composite CMS test issuer");
-        Instant now = Instant.now();
         X509v3CertificateBuilder issuerBuilder = new X509v3CertificateBuilder(
             issuerName,
             BigInteger.valueOf(2),
