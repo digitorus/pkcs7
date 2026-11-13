@@ -8,7 +8,6 @@ import (
 	"crypto/mldsa"
 	"crypto/rsa"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/asn1"
 	"errors"
 	"fmt"
@@ -143,10 +142,7 @@ func verifyCompositeSignature(
 
 	// Go's x509.Certificate.PublicKey is not decoded for unknown
 	// composite OIDs. Read the original SPKI instead.
-	var spki struct {
-		Algorithm pkix.AlgorithmIdentifier
-		PublicKey asn1.BitString
-	}
+	var spki subjectPublicKeyInfo
 	rest, err := asn1.Unmarshal(cert.RawSubjectPublicKeyInfo, &spki)
 	if err != nil || len(rest) != 0 {
 		return errors.New("pkcs7: invalid composite SubjectPublicKeyInfo")

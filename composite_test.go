@@ -89,10 +89,15 @@ func TestCompositeVerify(t *testing.T) {
 
 			pub := append(append([]byte{}, pq.PublicKey().Bytes()...), tradKey...)
 			oid := asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 6, arc}
-			spki, err := asn1.Marshal(struct {
-				Algorithm pkix.AlgorithmIdentifier
-				PublicKey asn1.BitString
-			}{pkix.AlgorithmIdentifier{Algorithm: oid}, asn1.BitString{Bytes: pub, BitLength: len(pub) * 8}})
+			spki, err := asn1.Marshal(subjectPublicKeyInfo{
+				Algorithm: pkix.AlgorithmIdentifier{
+					Algorithm: oid,
+				},
+				PublicKey: asn1.BitString{
+					Bytes:     pub,
+					BitLength: len(pub) * 8,
+				},
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
