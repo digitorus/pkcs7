@@ -3,6 +3,7 @@ package pkcs7
 import (
 	"bytes"
 	"crypto/x509"
+	"encoding/asn1"
 	"testing"
 )
 
@@ -108,5 +109,22 @@ func TestPadDoesNotWriteIntoSpareCapacity(t *testing.T) {
 	}
 	if !bytes.Equal(backing[3:], []byte{0xAA, 0xAA, 0xAA, 0xAA, 0xAA}) {
 		t.Fatalf("pad modified the caller's backing array: % X", backing)
+	}
+}
+
+func TestNewOctetStringMatchesASN1Marshal(t *testing.T) {
+	for _, n := range []int{0, 1, 127, 128, 255, 256, 65535, 65536, 1<<24 - 1, 1 << 24} {
+		content := bytes.Repeat([]byte{0xAB}, n)
+		want, err := asn1.Marshal(content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := newOctetString(n)
+		if c := cap(out); c != len(want) {
+			t.Errorf("n=%d: cap %d, want %d", n, c, len(want))
+		}
+		if got := append(out, content...); !bytes.Equal(got, want) {
+			t.Errorf("n=%d: header % X, want % X", n, got[:len(out)], want[:len(want)-n])
+		}
 	}
 }
