@@ -78,8 +78,9 @@ func ber2der(ber []byte) ([]byte, error) {
 		return nil, errors.New("ber2der: input ber is empty")
 	}
 	// fmt.Printf("--> ber2der: Transcoding %d bytes\n", len(ber))
-	// Already-DER input (the common case) is returned without copying. The
-	// result aliases ber, matching encoding/asn1 and crypto/x509 semantics.
+	// Already-DER input (the common case) is returned without copying, so the
+	// result aliases ber. Callers that expose data which must stay stable,
+	// such as PKCS7.Content, copy it.
 	end, isDER, err := derScan(ber, 0, 0)
 	if err != nil {
 		return nil, err

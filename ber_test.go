@@ -374,3 +374,34 @@ func TestBer2DerNonMinimalLengthIsTranscoded(t *testing.T) {
 		t.Fatalf("got % X, want % X", der, want)
 	}
 }
+
+func TestParseContentDoesNotAliasInput(t *testing.T) {
+	input := bytes.Clone(UnmarshalTestFixture(SignedTestFixture).Input)
+	p7, err := Parse(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p7.Content) == 0 {
+		t.Fatal("fixture has no content")
+	}
+	want := bytes.Clone(p7.Content)
+	for i := range input {
+		input[i] = 0xFF
+	}
+	if !bytes.Equal(p7.Content, want) {
+		t.Fatal("overwriting the input changed p7.Content")
+	}
+}
+
+func TestParseContentAppendDoesNotWriteIntoInput(t *testing.T) {
+	input := bytes.Clone(UnmarshalTestFixture(SignedTestFixture).Input)
+	orig := bytes.Clone(input)
+	p7, err := Parse(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = append(p7.Content, bytes.Repeat([]byte{0xAA}, 64)...)
+	if !bytes.Equal(input, orig) {
+		t.Fatal("appending to p7.Content wrote into the input")
+	}
+}

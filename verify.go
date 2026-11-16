@@ -1,6 +1,7 @@
 package pkcs7
 
 import (
+	"bytes"
 	"crypto/subtle"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -264,11 +265,11 @@ func parseSignedData(data []byte) (*PKCS7, error) {
 				return nil, err
 			}
 		} else {
-			content = compound.Bytes
+			content = bytes.Clone(compound.Bytes)
 		}
 	} else {
 		// assuming this is tag 04
-		content = compound.Bytes
+		content = bytes.Clone(compound.Bytes)
 	}
 	return &PKCS7{
 		Content:      content,
