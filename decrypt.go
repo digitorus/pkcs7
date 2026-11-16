@@ -1,7 +1,6 @@
 package pkcs7
 
 import (
-	"bytes"
 	"crypto"
 	"crypto/aes"
 	"crypto/cipher"
@@ -89,18 +88,29 @@ func (eci encryptedContentInfo) decrypt(key []byte) ([]byte, error) {
 	// or _be_ a tagged OCTET STRING
 	var cyphertext []byte
 	if eci.EncryptedContent.IsCompound {
-		// Complex case to concat all of the children OCTET STRINGs
-		var buf bytes.Buffer
+		// Complex case to concat all of the children OCTET STRINGs. A single
+		// child, which is what Encrypt produces, is used without copying.
+		var part asn1.RawValue
 		cypherbytes := eci.EncryptedContent.Bytes
-		for {
-			var part []byte
-			cypherbytes, _ = asn1.Unmarshal(cypherbytes, &part)
-			buf.Write(part)
-			if cypherbytes == nil {
-				break
+		for n := 0; len(cypherbytes) > 0; n++ {
+			var err error
+			cypherbytes, err = asn1.Unmarshal(cypherbytes, &part)
+			if err != nil {
+				return nil, fmt.Errorf("pkcs7: malformed EncryptedContent: %w", err)
+			}
+			if part.Class != asn1.ClassUniversal || part.Tag != asn1.TagOctetString || part.IsCompound {
+				return nil, errors.New("pkcs7: EncryptedContent fragment is not a primitive OCTET STRING")
+			}
+			switch n {
+			case 0:
+				cyphertext = part.Bytes
+			case 1:
+				joined := make([]byte, 0, len(eci.EncryptedContent.Bytes))
+				cyphertext = append(append(joined, cyphertext...), part.Bytes...)
+			default:
+				cyphertext = append(cyphertext, part.Bytes...)
 			}
 		}
-		cyphertext = buf.Bytes()
 	} else {
 		// Simple case, the bytes _are_ the cyphertext
 		cyphertext = eci.EncryptedContent.Bytes

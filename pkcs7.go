@@ -33,6 +33,13 @@ type contentInfo struct {
 	Content     asn1.RawValue `asn1:"explicit,optional,tag:0"`
 }
 
+// contentInfoOf marshals a ContentInfo together with its content in a single
+// pass, so the content is copied into the output only once.
+type contentInfoOf[T any] struct {
+	ContentType asn1.ObjectIdentifier
+	Content     T `asn1:"explicit,tag:0"`
+}
+
 // ErrUnsupportedContentType is returned when a PKCS7 content is not supported.
 // Currently only Data (1.2.840.113549.1.7.1), Signed Data (1.2.840.113549.1.7.2),
 // and Enveloped Data are supported (1.2.840.113549.1.7.3)
@@ -224,6 +231,10 @@ func mlDSAAlgorithmForOID(oid asn1.ObjectIdentifier) (mlDSAAlgorithm, bool) {
 }
 
 // Parse decodes a DER encoded PKCS7 package
+//
+// The returned Content is a copy, so it stays stable after Verify even if the
+// caller reuses data. Other fields, such as the certificates' Raw values, may
+// reference data directly, so data must not be modified while p7 is in use.
 func Parse(data []byte) (p7 *PKCS7, err error) {
 	if len(data) == 0 {
 		return nil, errors.New("pkcs7: input data is empty")

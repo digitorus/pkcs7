@@ -325,15 +325,7 @@ func (sd *SignedData) GetSignedData() *signedData {
 // Finish marshals the content and its signers
 func (sd *SignedData) Finish() ([]byte, error) {
 	sd.sd.Certificates = marshalCertificates(sd.certs)
-	inner, err := asn1.Marshal(sd.sd)
-	if err != nil {
-		return nil, err
-	}
-	outer := contentInfo{
-		ContentType: OIDSignedData,
-		Content:     asn1.RawValue{Class: 2, Tag: 0, Bytes: inner, IsCompound: true},
-	}
-	return asn1.Marshal(outer)
+	return asn1.Marshal(contentInfoOf[signedData]{ContentType: OIDSignedData, Content: sd.sd})
 }
 
 // RemoveAuthenticatedAttributes removes authenticated attributes from signedData

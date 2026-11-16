@@ -2,6 +2,8 @@ package pkcs7
 
 import (
 	"bytes"
+	"encoding/asn1"
+	"strings"
 	"testing"
 )
 
@@ -59,3 +61,106 @@ o5FC5Jg2FUfFzZSDmyZ6IONUsdF/i78KDV5nRv1R+hI6/oRlWNCtTNBv/lvBBd6b
 dseUE9QoaQZsn5lpILEvmQJAZ0B+Or1rAYjnbjnUhdVZoy9kC4Zov+4UH3N/BtSy
 KJRWUR0wTWfZBPZ5hAYZjTBEAFULaYCXlQKsODSp0M1aQA==
 -----END PRIVATE KEY-----`
+
+// fragmentEncryptedContent re-encodes the single OCTET STRING in eci's
+// EncryptedContent as OCTET STRING fragments of at most size bytes, followed
+// by extra.
+func fragmentEncryptedContent(t *testing.T, eci *encryptedContentInfo, size int, extra []byte) {
+	t.Helper()
+	var whole asn1.RawValue
+	if _, err := asn1.Unmarshal(eci.EncryptedContent.Bytes, &whole); err != nil {
+		t.Fatal(err)
+	}
+	var out []byte
+	for ct := whole.Bytes; len(ct) > 0; {
+		n := min(size, len(ct))
+		b, err := asn1.Marshal(ct[:n])
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, b...)
+		ct = ct[n:]
+	}
+	eci.EncryptedContent.Bytes = append(out, extra...)
+}
+
+func encryptForFragmentTest(t *testing.T, mode int, plaintext []byte) ([]byte, *encryptedContentInfo) {
+	t.Helper()
+	saved := ContentEncryptionAlgorithm
+	t.Cleanup(func() { ContentEncryptionAlgorithm = saved })
+	ContentEncryptionAlgorithm = mode
+	var (
+		key []byte
+		eci *encryptedContentInfo
+		err error
+	)
+	switch mode {
+	case EncryptionAlgorithmDESCBC:
+		key, eci, err = encryptDESCBC(plaintext, nil)
+	case EncryptionAlgorithmAES128GCM:
+		key, eci, err = encryptAESGCM(plaintext, nil)
+	default:
+		t.Fatalf("unsupported mode %d", mode)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key, eci
+}
+
+var fragmentTestModes = map[string]int{
+	"DES-CBC":    EncryptionAlgorithmDESCBC,
+	"AES128-GCM": EncryptionAlgorithmAES128GCM,
+}
+
+func TestDecryptFragmentedEncryptedContent(t *testing.T) {
+	plaintext := bytes.Repeat([]byte("fragmented content "), 10)
+	for name, mode := range fragmentTestModes {
+		t.Run(name, func(t *testing.T) {
+			key, eci := encryptForFragmentTest(t, mode, plaintext)
+			fragmentEncryptedContent(t, eci, 40, nil)
+			got, err := eci.decrypt(key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, plaintext) {
+				t.Fatalf("got %q, want %q", got, plaintext)
+			}
+		})
+	}
+}
+
+func TestDecryptRejectsMalformedEncryptedContent(t *testing.T) {
+	plaintext := bytes.Repeat([]byte("fragmented content "), 10)
+	tests := []struct {
+		name  string
+		size  int
+		extra []byte
+		first []byte
+	}{
+		{name: "trailing garbage", size: 1 << 20, extra: []byte{0xDE, 0xAD, 0xBE, 0xEF}},
+		{name: "trailing non OCTET STRING", size: 40, extra: []byte{0x02, 0x01, 0x05}},
+		{name: "constructed child", size: 40, extra: []byte{0x24, 0x02, 0x04, 0x00}},
+		{name: "truncated later fragment", size: 40, extra: []byte{0x04, 0x05, 0x01}},
+		{name: "malformed first child", first: []byte{0x04, 0x7F, 0x00}},
+	}
+	for name, mode := range fragmentTestModes {
+		for _, tc := range tests {
+			t.Run(name+"/"+tc.name, func(t *testing.T) {
+				key, eci := encryptForFragmentTest(t, mode, plaintext)
+				if tc.first != nil {
+					eci.EncryptedContent.Bytes = tc.first
+				} else {
+					fragmentEncryptedContent(t, eci, tc.size, tc.extra)
+				}
+				got, err := eci.decrypt(key)
+				if err == nil {
+					t.Fatalf("decrypt succeeded with %d bytes", len(got))
+				}
+				if !strings.Contains(err.Error(), "EncryptedContent") {
+					t.Fatalf("got %q, want an EncryptedContent parse error", err)
+				}
+			})
+		}
+	}
+}
