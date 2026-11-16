@@ -198,6 +198,11 @@ func TestOpenSSLEnvelopedDataInteroperability(t *testing.T) {
 	contentPath := filepath.Join(dir, "content.bin")
 	content := []byte("OpenSSL and Go agree on RSA key transport CMS EnvelopedData")
 	writeTestFile(t, contentPath, content)
+	// OpenSSL streams in 4096 byte chunks, so this content yields several
+	// EncryptedContent OCTET STRING fragments.
+	streamedContentPath := filepath.Join(dir, "streamed-content.bin")
+	streamedContent := bytes.Repeat(content, 200)
+	writeTestFile(t, streamedContentPath, streamedContent)
 	runOpenSSLCommand(t, "req", "-new", "-x509", "-newkey", "rsa:2048", "-nodes",
 		"-keyout", keyPath, "-out", certificatePath, "-subj", "/CN=CMS EnvelopedData interop", "-days", "1")
 	runOpenSSLCommand(t, "pkcs8", "-topk8", "-nocrypt", "-in", keyPath,
@@ -261,8 +266,54 @@ func TestOpenSSLEnvelopedDataInteroperability(t *testing.T) {
 					t.Fatalf("Go decrypted content %q, want %q", decrypted, content)
 				}
 			})
+
+			t.Run("OpenSSL_to_Go_streamed", func(t *testing.T) {
+				cmsPath := filepath.Join(dir, "openssl-streamed-"+algorithm.name+".der")
+				runOpenSSLCommand(t, openSSLCMSCommand, "-encrypt", "-stream", openSSLBinaryArg, algorithm.openSSLArg,
+					openSSLInArg, streamedContentPath, "-outform", openSSLDERFormat, openSSLOutArg, cmsPath, certificatePath)
+				cmsDER, err := os.ReadFile(cmsPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				parsed, err := Parse(cmsDER)
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertEnvelopedDataStructure(t, parsed, algorithm.oid)
+				if n := countEncryptedContentFragments(t, parsed); n < 2 {
+					t.Fatalf("EncryptedContent has %d fragments, want at least 2", n)
+				}
+				decrypted, err := parsed.Decrypt(certificate, privateKey)
+				if err != nil {
+					t.Fatalf("Go decryption failed: %v", err)
+				}
+				if !bytes.Equal(decrypted, streamedContent) {
+					t.Fatalf("Go decrypted %d bytes, want %d", len(decrypted), len(streamedContent))
+				}
+			})
 		})
 	}
+}
+
+func countEncryptedContentFragments(t *testing.T, parsed *PKCS7) int {
+	t.Helper()
+	data, ok := parsed.raw.(envelopedData)
+	if !ok {
+		t.Fatalf("parsed content type = %T, want envelopedData", parsed.raw)
+	}
+	encrypted := data.EncryptedContentInfo.EncryptedContent
+	if !encrypted.IsCompound {
+		return 0
+	}
+	n := 0
+	for rest := encrypted.Bytes; len(rest) > 0; n++ {
+		var fragment asn1.RawValue
+		var err error
+		if rest, err = asn1.Unmarshal(rest, &fragment); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return n
 }
 
 func readOpenSSLPrivateKey(t *testing.T, path string) crypto.Signer {
