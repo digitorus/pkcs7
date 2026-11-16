@@ -2,6 +2,7 @@ package pkcs7
 
 import (
 	"bytes"
+	"crypto/des"
 	"crypto/x509"
 	"encoding/asn1"
 	"testing"
@@ -91,24 +92,23 @@ func TestPad(t *testing.T) {
 		{[]byte{0x1, 0x2, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0}, []byte{0x1, 0x2, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0, 0x8, 0x8, 0x8, 0x8, 0x8, 0x8, 0x8, 0x8}, 8},
 	}
 	for _, test := range tests {
-		padded, err := pad(test.Original, test.BlockSize)
-		if err != nil {
-			t.Errorf("pad encountered error: %s", err)
-			continue
-		}
+		padded := appendPadded(nil, test.Original, test.BlockSize)
 		if !bytes.Equal(test.Expected, padded) {
 			t.Errorf("pad results mismatch:\n\tExpected: %X\n\tActual: %X", test.Expected, padded)
 		}
 	}
 }
 
-func TestPadDoesNotWriteIntoSpareCapacity(t *testing.T) {
-	backing := []byte{1, 2, 3, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA}
-	if _, err := pad(backing[:3], 8); err != nil {
+func TestEncryptCBCDoesNotWriteIntoSpareCapacity(t *testing.T) {
+	block, err := des.NewCipher([]byte("64BitKey"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(backing[3:], []byte{0xAA, 0xAA, 0xAA, 0xAA, 0xAA}) {
-		t.Fatalf("pad modified the caller's backing array: % X", backing)
+	backing := []byte{1, 2, 3, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA}
+	// #nosec G407 -- The IV is irrelevant; this only checks which memory encryptCBC writes.
+	encryptCBC(block, make([]byte, des.BlockSize), backing[:3])
+	if !bytes.Equal(backing, []byte{1, 2, 3, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA}) {
+		t.Fatalf("encryptCBC modified the caller's backing array: % X", backing)
 	}
 }
 

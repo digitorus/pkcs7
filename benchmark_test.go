@@ -19,7 +19,10 @@ func benchSign(b *testing.B, pair certKeyPair, content []byte) []byte {
 	if err != nil {
 		b.Fatal(err)
 	}
-	dig, _ := GetDigestOIDForSignatureAlgorithm(pair.Certificate.SignatureAlgorithm)
+	dig, err := GetDigestOIDForSignatureAlgorithm(pair.Certificate.SignatureAlgorithm)
+	if err != nil {
+		b.Fatal(err)
+	}
 	sd.SetDigestAlgorithm(dig)
 	if err := sd.AddSigner(pair.Certificate, *pair.PrivateKey, SignerInfoConfig{}); err != nil {
 		b.Fatal(err)
@@ -51,7 +54,10 @@ func BenchmarkSign(b *testing.B) {
 }
 
 func BenchmarkParse(b *testing.B) {
-	pair, _ := createTestCertificate(x509.SHA256WithRSA)
+	pair, err := createTestCertificate(x509.SHA256WithRSA)
+	if err != nil {
+		b.Fatal(err)
+	}
 	for _, size := range []int{1 << 10, 1 << 20} {
 		signed := benchSign(b, pair, benchContent(size))
 		b.Run(sizeName(size), func(b *testing.B) {
@@ -94,7 +100,10 @@ func BenchmarkParseAndVerify(b *testing.B) {
 func BenchmarkEncryptDecrypt(b *testing.B) {
 	saved := ContentEncryptionAlgorithm
 	defer func() { ContentEncryptionAlgorithm = saved }()
-	pair, _ := createTestCertificate(x509.SHA256WithRSA)
+	pair, err := createTestCertificate(x509.SHA256WithRSA)
+	if err != nil {
+		b.Fatal(err)
+	}
 	modes := map[string]int{
 		"AES128CBC": EncryptionAlgorithmAES128CBC,
 		"AES256CBC": EncryptionAlgorithmAES256CBC,
@@ -136,7 +145,10 @@ func BenchmarkEncryptDecrypt(b *testing.B) {
 }
 
 func BenchmarkBer2Der(b *testing.B) {
-	pair, _ := createTestCertificate(x509.SHA256WithRSA)
+	pair, err := createTestCertificate(x509.SHA256WithRSA)
+	if err != nil {
+		b.Fatal(err)
+	}
 	signed := benchSign(b, pair, benchContent(1<<20))
 	b.ReportAllocs()
 	b.SetBytes(int64(len(signed)))

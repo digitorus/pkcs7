@@ -1,6 +1,7 @@
 package pkcs7
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/des"
@@ -121,7 +122,7 @@ func encryptAESGCM(content []byte, key []byte) ([]byte, *encryptedContentInfo, e
 
 	// Seal directly after the OCTET STRING header so the ciphertext is not
 	// copied again when it is wrapped.
-	ciphertext := gcm.Seal(newOctetString(len(content)+gcm.Overhead()), nonce, content, nil)
+	ciphertextDER := gcm.Seal(newOctetString(len(content)+gcm.Overhead()), nonce, content, nil)
 
 	// Prepare ASN.1 Encrypted Content Info
 	paramSeq := aesGCMParameters{
@@ -143,7 +144,7 @@ func encryptAESGCM(content []byte, key []byte) ([]byte, *encryptedContentInfo, e
 				Bytes: paramBytes,
 			},
 		},
-		EncryptedContent: marshalEncryptedContent(ciphertext),
+		EncryptedContent: wrapEncryptedOctetString(ciphertextDER),
 	}
 
 	return key, &eci, nil
@@ -172,7 +173,7 @@ func encryptDESCBC(content []byte, key []byte) ([]byte, *encryptedContentInfo, e
 	if err != nil {
 		return nil, nil, err
 	}
-	cyphertext := encryptCBC(block, iv, content)
+	ciphertextDER := encryptCBC(block, iv, content)
 
 	// Prepare ASN.1 Encrypted Content Info
 	eci := encryptedContentInfo{
@@ -181,7 +182,7 @@ func encryptDESCBC(content []byte, key []byte) ([]byte, *encryptedContentInfo, e
 			Algorithm:  OIDEncryptionAlgorithmDESCBC,
 			Parameters: asn1.RawValue{Tag: 4, Bytes: iv},
 		},
-		EncryptedContent: marshalEncryptedContent(cyphertext),
+		EncryptedContent: wrapEncryptedOctetString(ciphertextDER),
 	}
 
 	return key, &eci, nil
@@ -223,7 +224,7 @@ func encryptAESCBC(content []byte, key []byte) ([]byte, *encryptedContentInfo, e
 	if err != nil {
 		return nil, nil, err
 	}
-	cyphertext := encryptCBC(block, iv, content)
+	ciphertextDER := encryptCBC(block, iv, content)
 
 	// Prepare ASN.1 Encrypted Content Info
 	eci := encryptedContentInfo{
@@ -232,7 +233,7 @@ func encryptAESCBC(content []byte, key []byte) ([]byte, *encryptedContentInfo, e
 			Algorithm:  algID,
 			Parameters: asn1.RawValue{Tag: 4, Bytes: iv},
 		},
-		EncryptedContent: marshalEncryptedContent(cyphertext),
+		EncryptedContent: wrapEncryptedOctetString(ciphertextDER),
 	}
 
 	return key, &eci, nil
@@ -340,30 +341,21 @@ func EncryptUsingPSK(content []byte, key []byte) ([]byte, error) {
 	return asn1.Marshal(contentInfoOf[encryptedData]{ContentType: OIDEncryptedData, Content: ed})
 }
 
-// marshalEncryptedContent wraps a DER encoded OCTET STRING as the [0]
-// EncryptedContent field without copying it.
-func marshalEncryptedContent(octetString []byte) asn1.RawValue {
+// wrapEncryptedOctetString wraps a DER encoded OCTET STRING holding the
+// ciphertext as the [0] EncryptedContent field without copying it. It does not
+// encode raw ciphertext; build the OCTET STRING with newOctetString first.
+func wrapEncryptedOctetString(octetString []byte) asn1.RawValue {
 	return asn1.RawValue{Tag: 0, Class: 2, Bytes: octetString, IsCompound: true}
 }
 
 // newOctetString returns a buffer holding the DER header of an OCTET STRING
 // with n content bytes and enough capacity to append the content.
 func newOctetString(n int) []byte {
-	header := 2
-	if n >= 128 {
-		header += lengthLength(n)
-	}
-	out := make([]byte, 0, header+n)
-	out = append(out, asn1.TagOctetString)
-	if n < 128 {
-		return append(out, byte(n))
-	}
-	l := lengthLength(n)
-	out = append(out, 0x80|byte(l))
-	for ; l > 0; l-- {
-		out = append(out, byte(n>>uint((l-1)*8)))
-	}
-	return out
+	tag := []byte{asn1.TagOctetString}
+	out := bytes.NewBuffer(make([]byte, 0, derObjectLen(tag, n)))
+	out.Write(tag)
+	_ = encodeLength(out, n)
+	return out.Bytes()
 }
 
 // encryptCBC pads and encrypts content in place inside a single DER OCTET
@@ -372,7 +364,7 @@ func encryptCBC(block cipher.Block, iv, content []byte) []byte {
 	blockSize := block.BlockSize()
 	out := newOctetString(len(content) + blockSize - len(content)%blockSize)
 	start := len(out)
-	out, _ = appendPadded(out, content, blockSize)
+	out = appendPadded(out, content, blockSize)
 	cipher.NewCBCEncrypter(block, iv).CryptBlocks(out[start:], out[start:])
 	return out
 }
@@ -400,21 +392,14 @@ func makeRecipientInfo(key []byte, recipient *x509.Certificate) (asn1.RawValue, 
 	return raw, true, err
 }
 
-func pad(data []byte, blocklen int) ([]byte, error) {
-	return appendPadded(nil, data, blocklen)
-}
-
 // appendPadded appends data followed by its PKCS#7 padding to dst. It never
 // writes into data's spare capacity.
-func appendPadded(dst, data []byte, blocklen int) ([]byte, error) {
-	if blocklen < 1 {
-		return nil, fmt.Errorf("invalid blocklen %d", blocklen)
-	}
+func appendPadded(dst, data []byte, blocklen int) []byte {
 	padlen := blocklen - (len(data) % blocklen)
 	dst = slices.Grow(dst, len(data)+padlen)
 	dst = append(dst, data...)
 	for range padlen {
 		dst = append(dst, byte(padlen))
 	}
-	return dst, nil
+	return dst
 }
