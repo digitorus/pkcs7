@@ -19,6 +19,12 @@ const (
 	openSSLDERFormat   = "DER"
 	openSSLInArg       = "-in"
 	openSSLOutArg      = "-out"
+	openSSLDigestArg   = "-md"
+	openSSLKeyArg      = "-inkey"
+	openSSLOutFormArg  = "-outform"
+	openSSLSHA256      = "sha256"
+	openSSLSignArg     = "-sign"
+	openSSLSignerArg   = "-signer"
 )
 
 type classicalInteropAlgorithm struct {
@@ -181,6 +187,89 @@ func TestOpenSSLClassicalInteroperability(t *testing.T) {
 						}
 					})
 				}
+			}
+		})
+	}
+}
+
+func TestOpenSSLRSAPSSInteroperability(t *testing.T) {
+	if os.Getenv("PKCS7_OPENSSL_INTEROP") == "" {
+		t.Skip("set PKCS7_OPENSSL_INTEROP to run interoperability tests with openssl from PATH")
+	}
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "signer-key.pem")
+	keyDERPath := filepath.Join(dir, "signer-key.der")
+	certificatePath := filepath.Join(dir, "signer-cert.pem")
+	contentPath := filepath.Join(dir, "content.bin")
+	content := []byte("OpenSSL and Go agree on RSASSA-PSS CMS signatures")
+	writeTestFile(t, contentPath, content)
+	runOpenSSLCommand(t, "req", "-new", "-x509", "-newkey", "rsa:3072", "-nodes", "-keyout", keyPath,
+		"-out", certificatePath, "-subj", "/CN=RSASSA-PSS CMS interop", "-days", "1")
+	runOpenSSLCommand(t, "pkcs8", "-topk8", "-nocrypt", openSSLInArg, keyPath, openSSLOutFormArg, openSSLDERFormat, openSSLOutArg, keyDERPath)
+	certificate := readOpenSSLCertificate(t, certificatePath)
+	signer := algorithmSigner{Signer: readOpenSSLPrivateKey(t, keyDERPath), algorithm: x509.SHA256WithRSAPSS}
+
+	for _, direct := range []bool{false, true} {
+		name := interopCaseName(false, direct)
+		t.Run("Go_to_OpenSSL/"+name, func(t *testing.T) {
+			signedData, err := NewSignedData(content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			signedData.SetDigestAlgorithm(OIDDigestAlgorithmSHA256)
+			if direct {
+				err = signedData.SignWithoutAttr(certificate, signer, SignerInfoConfig{})
+			} else {
+				err = signedData.AddSigner(certificate, signer, SignerInfoConfig{})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmsDER, err := signedData.Finish()
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed, err := Parse(cmsDER)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertClassicalStructure(t, parsed, OIDDigestAlgorithmSHA256, OIDEncryptionAlgorithmRSAPSS, !direct)
+			cmsPath := filepath.Join(dir, "go-"+strings.ReplaceAll(name, "/", "-")+".der")
+			outputPath := filepath.Join(dir, "openssl-"+strings.ReplaceAll(name, "/", "-")+".bin")
+			writeTestFile(t, cmsPath, cmsDER)
+			runOpenSSLCommand(t, openSSLCMSCommand, "-verify", openSSLBinaryArg, "-inform", openSSLDERFormat,
+				openSSLInArg, cmsPath, "-noverify", openSSLOutArg, outputPath)
+			verified, err := os.ReadFile(outputPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(verified, content) {
+				t.Fatalf("OpenSSL verified content %q, want %q", verified, content)
+			}
+		})
+
+		t.Run("OpenSSL_to_Go/"+name, func(t *testing.T) {
+			cmsPath := filepath.Join(dir, "openssl-"+strings.ReplaceAll(name, "/", "-")+".der")
+			signArgs := []string{
+				openSSLCMSCommand, openSSLSignArg, openSSLBinaryArg, openSSLDigestArg, openSSLSHA256, openSSLInArg, contentPath,
+				openSSLSignerArg, certificatePath, openSSLKeyArg, keyPath, "-keyopt", "rsa_padding_mode:pss",
+				"-keyopt", "rsa_pss_saltlen:32", "-nodetach", openSSLOutFormArg, openSSLDERFormat, openSSLOutArg, cmsPath,
+			}
+			if direct {
+				signArgs = append(signArgs, "-noattr")
+			}
+			runOpenSSLCommand(t, signArgs...)
+			cmsDER, err := os.ReadFile(cmsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed, err := Parse(cmsDER)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertClassicalStructure(t, parsed, OIDDigestAlgorithmSHA256, OIDEncryptionAlgorithmRSAPSS, !direct)
+			if err := parsed.Verify(); err != nil {
+				t.Fatalf("Go verification failed: %v", err)
 			}
 		})
 	}
