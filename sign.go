@@ -5,8 +5,10 @@ import (
 	"crypto"
 	"crypto/dsa"
 	"crypto/ed25519"
+	"crypto/fips140"
 	"crypto/mldsa"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
@@ -57,6 +59,18 @@ type SignerInfoConfig struct {
 	SkipSigningTime bool
 }
 
+// SignatureAlgorithmSigner is a crypto.Signer that tells which signature
+// algorithm it signs with. A signer whose X509SignatureAlgorithm is
+// SHA256WithRSAPSS, SHA384WithRSAPSS or SHA512WithRSAPSS, such as an RSA key
+// in an HSM that only signs RSASSA-PSS, signs and is declared as
+// id-RSASSA-PSS: MGF1 over the digest algorithm and a salt as long as its
+// hash (RFC 4056). Its hash must match the digest algorithm. Any other
+// signer with an RSA key signs PKCS #1 v1.5.
+type SignatureAlgorithmSigner interface {
+	crypto.Signer
+	X509SignatureAlgorithm() x509.SignatureAlgorithm
+}
+
 type signedData struct {
 	Version                    int                        `asn1:"default:1"`
 	DigestAlgorithmIdentifiers []pkix.AlgorithmIdentifier `asn1:"set"`
@@ -83,12 +97,14 @@ const (
 	cmsSigningModeDSA
 	cmsSigningModeEd25519
 	cmsSigningModeMLDSA
+	cmsSigningModeRSAPSS
 )
 
 type cmsSignerAlgorithm struct {
-	digestOID    asn1.ObjectIdentifier
-	signatureOID asn1.ObjectIdentifier
-	mode         cmsSigningMode
+	digestOID           asn1.ObjectIdentifier
+	signatureOID        asn1.ObjectIdentifier
+	mode                cmsSigningMode
+	signatureParameters asn1.RawValue
 }
 
 type attribute struct {
@@ -150,6 +166,8 @@ func (sd *SignedData) AddSigner(ee *x509.Certificate, keyOrSigner interface{}, c
 //
 // The signature algorithm used to hash the data is the one of the end-entity
 // certificate. The signer can be either a crypto.Signer or crypto.PrivateKey.
+// An RSA signature that does not verify against the end-entity certificate's
+// key under the declared scheme returns an error.
 func (sd *SignedData) AddSignerChain(ee *x509.Certificate, keyOrSigner interface{}, parents []*x509.Certificate, config SignerInfoConfig) error {
 	algorithm, err := getCMSSignerAlgorithm(keyOrSigner, sd.digestOid, nil)
 	if err != nil {
@@ -223,11 +241,14 @@ func (sd *SignedData) AddSignerChain(ee *x509.Certificate, keyOrSigner interface
 	if err != nil {
 		return err
 	}
+	if err := algorithm.checkRSASignature(ee, attrBytes, hash, signature); err != nil {
+		return err
+	}
 	signerInfo := signerInfo{
 		AuthenticatedAttributes:   finalAttrs,
 		UnauthenticatedAttributes: finalUnsignedAttrs,
 		DigestAlgorithm:           pkix.AlgorithmIdentifier{Algorithm: algorithm.digestOID},
-		DigestEncryptionAlgorithm: pkix.AlgorithmIdentifier{Algorithm: algorithm.signatureOID},
+		DigestEncryptionAlgorithm: pkix.AlgorithmIdentifier{Algorithm: algorithm.signatureOID, Parameters: algorithm.signatureParameters},
 		IssuerAndSerialNumber:     ias,
 		EncryptedDigest:           signature,
 		Version:                   1,
@@ -249,6 +270,8 @@ func (sd *SignedData) AddSignerChain(ee *x509.Certificate, keyOrSigner interface
 // This function is needed to sign old Android APKs, something you probably
 // shouldn't do unless you're maintaining backward compatibility for old
 // applications. The signer can be either a crypto.Signer or crypto.PrivateKey.
+// An RSA signature that does not verify against the end-entity certificate's
+// key under the declared scheme returns an error.
 func (sd *SignedData) SignWithoutAttr(ee *x509.Certificate, keyOrSigner interface{}, config SignerInfoConfig) error {
 	algorithm, err := getCMSSignerAlgorithm(keyOrSigner, sd.digestOid, sd.encryptionOid)
 	if err != nil {
@@ -267,6 +290,9 @@ func (sd *SignedData) SignWithoutAttr(ee *x509.Certificate, keyOrSigner interfac
 	if err != nil {
 		return err
 	}
+	if err := algorithm.checkRSASignature(ee, sd.data, hash, signature); err != nil {
+		return err
+	}
 
 	var ias issuerAndSerial
 	ias.SerialNumber = ee.SerialNumber
@@ -274,7 +300,7 @@ func (sd *SignedData) SignWithoutAttr(ee *x509.Certificate, keyOrSigner interfac
 	ias.IssuerName = asn1.RawValue{FullBytes: ee.RawIssuer}
 	signerInfo := signerInfo{
 		DigestAlgorithm:           pkix.AlgorithmIdentifier{Algorithm: algorithm.digestOID},
-		DigestEncryptionAlgorithm: pkix.AlgorithmIdentifier{Algorithm: algorithm.signatureOID},
+		DigestEncryptionAlgorithm: pkix.AlgorithmIdentifier{Algorithm: algorithm.signatureOID, Parameters: algorithm.signatureParameters},
 		IssuerAndSerialNumber:     ias,
 		EncryptedDigest:           signature,
 		Version:                   1,
@@ -383,7 +409,7 @@ func cert2issuerAndSerial(cert *x509.Certificate) issuerAndSerial {
 func getCMSSignerAlgorithm(keyOrSigner interface{}, digestOID, configuredSignatureOID asn1.ObjectIdentifier) (cmsSignerAlgorithm, error) {
 	if _, ok := keyOrSigner.(*dsa.PrivateKey); ok {
 		signatureOID, err := getOIDForEncryptionAlgorithm(keyOrSigner, digestOID)
-		return cmsSignerAlgorithm{digestOID, signatureOID, cmsSigningModeDSA}, err
+		return cmsSignerAlgorithm{digestOID: digestOID, signatureOID: signatureOID, mode: cmsSigningModeDSA}, err
 	}
 
 	signer, ok := keyOrSigner.(crypto.Signer)
@@ -391,7 +417,21 @@ func getCMSSignerAlgorithm(keyOrSigner interface{}, digestOID, configuredSignatu
 		return cmsSignerAlgorithm{}, errors.New("pkcs7: private key does not implement crypto.Signer")
 	}
 	if algorithm, ok := mlDSAAlgorithmForPublicKey(signer.Public()); ok {
-		return cmsSignerAlgorithm{OIDDigestAlgorithmSHA512, algorithm.oid, cmsSigningModeMLDSA}, nil
+		return cmsSignerAlgorithm{digestOID: OIDDigestAlgorithmSHA512, signatureOID: algorithm.oid, mode: cmsSigningModeMLDSA}, nil
+	}
+
+	if pssHash, ok := rsaPSSHash(signer); ok {
+		if hash, err := getHashForOID(digestOID); err != nil || hash != pssHash {
+			return cmsSignerAlgorithm{}, fmt.Errorf("pkcs7: signer signs RSASSA-PSS with %s, but the digest algorithm is %q", pssHash, digestOID.String())
+		}
+		if _, ok := signer.Public().(*rsa.PublicKey); !ok {
+			return cmsSignerAlgorithm{}, fmt.Errorf("pkcs7: RSASSA-PSS needs an RSA key, got %T", signer.Public())
+		}
+		parameters, err := marshalRSAPSSParameters(digestOID, pssHash)
+		if err != nil {
+			return cmsSignerAlgorithm{}, err
+		}
+		return cmsSignerAlgorithm{digestOID: digestOID, signatureOID: OIDEncryptionAlgorithmRSAPSS, mode: cmsSigningModeRSAPSS, signatureParameters: parameters}, nil
 	}
 
 	signatureOID := configuredSignatureOID
@@ -406,7 +446,47 @@ func getCMSSignerAlgorithm(keyOrSigner interface{}, digestOID, configuredSignatu
 	if _, ok := signer.Public().(ed25519.PublicKey); ok {
 		mode = cmsSigningModeEd25519
 	}
-	return cmsSignerAlgorithm{digestOID, signatureOID, mode}, nil
+	return cmsSignerAlgorithm{digestOID: digestOID, signatureOID: signatureOID, mode: mode}, nil
+}
+
+// rsaPSSHash returns the hash of a SignatureAlgorithmSigner that signs
+// RSASSA-PSS, and false for any other signer.
+func rsaPSSHash(signer crypto.Signer) (crypto.Hash, bool) {
+	algorithmSigner, ok := signer.(SignatureAlgorithmSigner)
+	if !ok {
+		return 0, false
+	}
+	switch algorithmSigner.X509SignatureAlgorithm() {
+	case x509.SHA256WithRSAPSS:
+		return crypto.SHA256, true
+	case x509.SHA384WithRSAPSS:
+		return crypto.SHA384, true
+	case x509.SHA512WithRSAPSS:
+		return crypto.SHA512, true
+	default:
+		return 0, false
+	}
+}
+
+// marshalRSAPSSParameters encodes the RSASSA-PSS-params for the digest
+// algorithm and its hash: MGF1 over the same hash and a salt as long as its
+// output.
+func marshalRSAPSSParameters(digestOID asn1.ObjectIdentifier, hash crypto.Hash) (asn1.RawValue, error) {
+	hashAlgorithm := pkix.AlgorithmIdentifier{Algorithm: digestOID, Parameters: asn1.NullRawValue}
+	mgfParameters, err := asn1.Marshal(hashAlgorithm)
+	if err != nil {
+		return asn1.RawValue{}, err
+	}
+	parameters, err := asn1.Marshal(pssParameters{
+		Hash:         hashAlgorithm,
+		MGF:          pkix.AlgorithmIdentifier{Algorithm: OIDMaskGenerationFunctionMGF1, Parameters: asn1.RawValue{FullBytes: mgfParameters}},
+		SaltLength:   hash.Size(),
+		TrailerField: 1,
+	})
+	if err != nil {
+		return asn1.RawValue{}, err
+	}
+	return asn1.RawValue{FullBytes: parameters}, nil
 }
 
 func (algorithm cmsSignerAlgorithm) sign(keyOrSigner interface{}, data []byte, digestAlg crypto.Hash) ([]byte, error) {
@@ -427,11 +507,50 @@ func (algorithm cmsSignerAlgorithm) sign(keyOrSigner interface{}, data []byte, d
 		return signer.Sign(rand.Reader, data, crypto.Hash(0))
 	case cmsSigningModeMLDSA:
 		return signer.Sign(rand.Reader, data, &mldsa.Options{})
+	case cmsSigningModeRSAPSS:
+		return crypto.SignMessage(signer, rand.Reader, data, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash, Hash: digestAlg})
 	default:
-		h := digestAlg.New()
-		h.Write(data)
-		return signer.Sign(rand.Reader, h.Sum(nil), digestAlg)
+		// crypto.SignMessage hands a crypto.MessageSigner the data itself and
+		// hashes it for any other signer, so a signer that hashes on its own
+		// (an HSM or remote signing service) does not sign a hash of the hash.
+		return crypto.SignMessage(signer, rand.Reader, data, digestAlg)
 	}
+}
+
+// checkRSASignature verifies an RSA signature against the certificate's key
+// under the scheme the SignerInfo declares. A signer that signs with another
+// scheme than declared, such as an HSM that only signs RSASSA-PSS behind a
+// signer that does not implement SignatureAlgorithmSigner, then fails here
+// instead of producing a SignerInfo that does not verify.
+func (algorithm cmsSignerAlgorithm) checkRSASignature(ee *x509.Certificate, data []byte, hash crypto.Hash, signature []byte) error {
+	publicKey, ok := ee.PublicKey.(*rsa.PublicKey)
+	if !ok {
+		return nil
+	}
+	// crypto/rsa refuses to verify with keys below 1024 bits, and below 2048
+	// bits in FIPS 140-only mode, while an external signer may still sign
+	// with them.
+	minimumBits := 1024
+	if fips140.Enforced() {
+		minimumBits = 2048
+	}
+	if publicKey.N.BitLen() < minimumBits {
+		return nil
+	}
+	h := hash.New()
+	h.Write(data)
+	digest := h.Sum(nil)
+	switch algorithm.mode {
+	case cmsSigningModeRSAPSS:
+		if err := rsa.VerifyPSS(publicKey, hash, digest, signature, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash}); err != nil {
+			return fmt.Errorf("pkcs7: signature does not verify as RSASSA-PSS with %s and a salt as long as its hash: %w", hash, err)
+		}
+	case cmsSigningModePreHashed:
+		if err := rsa.VerifyPKCS1v15(publicKey, hash, digest, signature); err != nil {
+			return fmt.Errorf("pkcs7: signature does not verify as PKCS #1 v1.5 with %s: %w", hash, err)
+		}
+	}
+	return nil
 }
 
 type dsaSignature struct {
