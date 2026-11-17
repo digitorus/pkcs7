@@ -556,3 +556,96 @@ func TestSignHandsMessageSignerTheData(t *testing.T) {
 		t.Fatalf("Cannot verify signed data: %s", err)
 	}
 }
+
+// algorithmSigner reports the signature algorithm it signs with.
+type algorithmSigner struct {
+	crypto.Signer
+	algorithm x509.SignatureAlgorithm
+}
+
+func (s algorithmSigner) X509SignatureAlgorithm() x509.SignatureAlgorithm { return s.algorithm }
+
+// pssOnlySigner signs RSASSA-PSS whatever it is asked for, as an HSM with an
+// RSASSA-PSS key does.
+type pssOnlySigner struct {
+	crypto.Signer
+}
+
+func (s pssOnlySigner) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
+	return s.Signer.Sign(rand, digest, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash, Hash: opts.HashFunc()})
+}
+
+func TestSignRSAPSS(t *testing.T) {
+	tests := map[string]struct {
+		certSigAlg x509.SignatureAlgorithm
+		digestOID  asn1.ObjectIdentifier
+		pssOnly    bool
+		reports    x509.SignatureAlgorithm
+		wantSigAlg x509.SignatureAlgorithm
+		wantErr    bool
+	}{
+		"reports PSS, SHA-256 digest":      {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA256, reports: x509.SHA256WithRSAPSS, wantSigAlg: x509.SHA256WithRSAPSS},
+		"reports PSS, SHA-384 digest":      {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA384, reports: x509.SHA384WithRSAPSS, wantSigAlg: x509.SHA384WithRSAPSS},
+		"reports PSS, SHA-512 digest":      {certSigAlg: x509.SHA512WithRSA, digestOID: OIDDigestAlgorithmSHA512, reports: x509.SHA512WithRSAPSS, wantSigAlg: x509.SHA512WithRSAPSS},
+		"PSS-only signer that reports PSS": {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA256, pssOnly: true, reports: x509.SHA256WithRSAPSS, wantSigAlg: x509.SHA256WithRSAPSS},
+		"reports nothing":                  {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA256, wantSigAlg: x509.SHA256WithRSA},
+		"reports PKCS #1 v1.5":             {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA256, reports: x509.SHA256WithRSA, wantSigAlg: x509.SHA256WithRSA},
+		"reports PSS with another hash":    {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA384, reports: x509.SHA256WithRSAPSS, wantErr: true},
+		"ECDSA key that reports PSS":       {certSigAlg: x509.ECDSAWithSHA256, digestOID: OIDDigestAlgorithmSHA256, reports: x509.SHA256WithRSAPSS, wantErr: true},
+	}
+	for name, test := range tests {
+		for _, withoutAttributes := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s, without attributes %t", name, withoutAttributes), func(t *testing.T) {
+				cert, err := createTestCertificate(test.certSigAlg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				signer := (*cert.PrivateKey).(crypto.Signer)
+				if test.pssOnly {
+					signer = pssOnlySigner{Signer: signer}
+				}
+				if test.reports != x509.UnknownSignatureAlgorithm {
+					signer = algorithmSigner{Signer: signer, algorithm: test.reports}
+				}
+				toBeSigned, err := NewSignedData([]byte("Hello World"))
+				if err != nil {
+					t.Fatalf("Cannot initialize signed data: %s", err)
+				}
+				toBeSigned.SetDigestAlgorithm(test.digestOID)
+				if withoutAttributes {
+					err = toBeSigned.SignWithoutAttr(cert.Certificate, signer, SignerInfoConfig{})
+				} else {
+					err = toBeSigned.AddSigner(cert.Certificate, signer, SignerInfoConfig{})
+				}
+				if test.wantErr {
+					if err == nil {
+						t.Fatal("Added the signer, expected an error")
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("Cannot add signer: %s", err)
+				}
+				signed, err := toBeSigned.Finish()
+				if err != nil {
+					t.Fatalf("Cannot finish signing data: %s", err)
+				}
+				p7, err := Parse(signed)
+				if err != nil {
+					t.Fatalf("Cannot parse signed data: %v", err)
+				}
+				signerInfo := p7.Signers[0]
+				sigAlg, err := getSignatureAlgorithm(signerInfo.DigestEncryptionAlgorithm, signerInfo.DigestAlgorithm)
+				if err != nil {
+					t.Fatalf("Cannot read the signature algorithm: %s", err)
+				}
+				if sigAlg != test.wantSigAlg {
+					t.Fatalf("Got signature algorithm %s, expected %s", sigAlg, test.wantSigAlg)
+				}
+				if err := p7.Verify(); err != nil {
+					t.Fatalf("Cannot verify signed data: %s", err)
+				}
+			})
+		}
+	}
+}
