@@ -575,23 +575,36 @@ func (s pssOnlySigner) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpt
 	return s.Signer.Sign(rand, digest, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash, Hash: opts.HashFunc()})
 }
 
+// pkcs1OnlySigner signs PKCS #1 v1.5 whatever it is asked for, as an HSM
+// with a PKCS #1 v1.5 key does.
+type pkcs1OnlySigner struct {
+	crypto.Signer
+}
+
+func (s pkcs1OnlySigner) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
+	return s.Signer.Sign(rand, digest, opts.HashFunc())
+}
+
 func TestSignRSAPSS(t *testing.T) {
 	tests := map[string]struct {
 		certSigAlg x509.SignatureAlgorithm
 		digestOID  asn1.ObjectIdentifier
 		pssOnly    bool
+		pkcs1Only  bool
 		reports    x509.SignatureAlgorithm
 		wantSigAlg x509.SignatureAlgorithm
 		wantErr    bool
 	}{
-		"reports PSS, SHA-256 digest":      {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA256, reports: x509.SHA256WithRSAPSS, wantSigAlg: x509.SHA256WithRSAPSS},
-		"reports PSS, SHA-384 digest":      {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA384, reports: x509.SHA384WithRSAPSS, wantSigAlg: x509.SHA384WithRSAPSS},
-		"reports PSS, SHA-512 digest":      {certSigAlg: x509.SHA512WithRSA, digestOID: OIDDigestAlgorithmSHA512, reports: x509.SHA512WithRSAPSS, wantSigAlg: x509.SHA512WithRSAPSS},
-		"PSS-only signer that reports PSS": {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA256, pssOnly: true, reports: x509.SHA256WithRSAPSS, wantSigAlg: x509.SHA256WithRSAPSS},
-		"reports nothing":                  {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA256, wantSigAlg: x509.SHA256WithRSA},
-		"reports PKCS #1 v1.5":             {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA256, reports: x509.SHA256WithRSA, wantSigAlg: x509.SHA256WithRSA},
-		"reports PSS with another hash":    {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA384, reports: x509.SHA256WithRSAPSS, wantErr: true},
-		"ECDSA key that reports PSS":       {certSigAlg: x509.ECDSAWithSHA256, digestOID: OIDDigestAlgorithmSHA256, reports: x509.SHA256WithRSAPSS, wantErr: true},
+		"reports PSS, SHA-256 digest":               {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA256, reports: x509.SHA256WithRSAPSS, wantSigAlg: x509.SHA256WithRSAPSS},
+		"reports PSS, SHA-384 digest":               {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA384, reports: x509.SHA384WithRSAPSS, wantSigAlg: x509.SHA384WithRSAPSS},
+		"reports PSS, SHA-512 digest":               {certSigAlg: x509.SHA512WithRSA, digestOID: OIDDigestAlgorithmSHA512, reports: x509.SHA512WithRSAPSS, wantSigAlg: x509.SHA512WithRSAPSS},
+		"PSS-only signer that reports PSS":          {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA256, pssOnly: true, reports: x509.SHA256WithRSAPSS, wantSigAlg: x509.SHA256WithRSAPSS},
+		"reports nothing":                           {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA256, wantSigAlg: x509.SHA256WithRSA},
+		"reports PKCS #1 v1.5":                      {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA256, reports: x509.SHA256WithRSA, wantSigAlg: x509.SHA256WithRSA},
+		"PSS-only signer that reports nothing":      {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA256, pssOnly: true, wantErr: true},
+		"reports PSS with another hash":             {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA384, reports: x509.SHA256WithRSAPSS, wantErr: true},
+		"PKCS #1 v1.5-only signer that reports PSS": {certSigAlg: x509.SHA256WithRSA, digestOID: OIDDigestAlgorithmSHA256, pkcs1Only: true, reports: x509.SHA256WithRSAPSS, wantErr: true},
+		"ECDSA key that reports PSS":                {certSigAlg: x509.ECDSAWithSHA256, digestOID: OIDDigestAlgorithmSHA256, reports: x509.SHA256WithRSAPSS, wantErr: true},
 	}
 	for name, test := range tests {
 		for _, withoutAttributes := range []bool{false, true} {
@@ -603,6 +616,9 @@ func TestSignRSAPSS(t *testing.T) {
 				signer := (*cert.PrivateKey).(crypto.Signer)
 				if test.pssOnly {
 					signer = pssOnlySigner{Signer: signer}
+				}
+				if test.pkcs1Only {
+					signer = pkcs1OnlySigner{Signer: signer}
 				}
 				if test.reports != x509.UnknownSignatureAlgorithm {
 					signer = algorithmSigner{Signer: signer, algorithm: test.reports}

@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"crypto/dsa"
 	"crypto/ed25519"
+	"crypto/fips140"
 	"crypto/mldsa"
 	"crypto/rand"
 	"crypto/rsa"
@@ -165,6 +166,8 @@ func (sd *SignedData) AddSigner(ee *x509.Certificate, keyOrSigner interface{}, c
 //
 // The signature algorithm used to hash the data is the one of the end-entity
 // certificate. The signer can be either a crypto.Signer or crypto.PrivateKey.
+// An RSA signature that does not verify against the end-entity certificate's
+// key under the declared scheme returns an error.
 func (sd *SignedData) AddSignerChain(ee *x509.Certificate, keyOrSigner interface{}, parents []*x509.Certificate, config SignerInfoConfig) error {
 	algorithm, err := getCMSSignerAlgorithm(keyOrSigner, sd.digestOid, nil)
 	if err != nil {
@@ -238,6 +241,9 @@ func (sd *SignedData) AddSignerChain(ee *x509.Certificate, keyOrSigner interface
 	if err != nil {
 		return err
 	}
+	if err := algorithm.checkRSASignature(ee, attrBytes, hash, signature); err != nil {
+		return err
+	}
 	signerInfo := signerInfo{
 		AuthenticatedAttributes:   finalAttrs,
 		UnauthenticatedAttributes: finalUnsignedAttrs,
@@ -264,6 +270,8 @@ func (sd *SignedData) AddSignerChain(ee *x509.Certificate, keyOrSigner interface
 // This function is needed to sign old Android APKs, something you probably
 // shouldn't do unless you're maintaining backward compatibility for old
 // applications. The signer can be either a crypto.Signer or crypto.PrivateKey.
+// An RSA signature that does not verify against the end-entity certificate's
+// key under the declared scheme returns an error.
 func (sd *SignedData) SignWithoutAttr(ee *x509.Certificate, keyOrSigner interface{}, config SignerInfoConfig) error {
 	algorithm, err := getCMSSignerAlgorithm(keyOrSigner, sd.digestOid, sd.encryptionOid)
 	if err != nil {
@@ -280,6 +288,9 @@ func (sd *SignedData) SignWithoutAttr(ee *x509.Certificate, keyOrSigner interfac
 
 	signature, err := algorithm.sign(keyOrSigner, sd.data, hash)
 	if err != nil {
+		return err
+	}
+	if err := algorithm.checkRSASignature(ee, sd.data, hash, signature); err != nil {
 		return err
 	}
 
@@ -504,6 +515,42 @@ func (algorithm cmsSignerAlgorithm) sign(keyOrSigner interface{}, data []byte, d
 		// (an HSM or remote signing service) does not sign a hash of the hash.
 		return crypto.SignMessage(signer, rand.Reader, data, digestAlg)
 	}
+}
+
+// checkRSASignature verifies an RSA signature against the certificate's key
+// under the scheme the SignerInfo declares. A signer that signs with another
+// scheme than declared, such as an HSM that only signs RSASSA-PSS behind a
+// signer that does not implement SignatureAlgorithmSigner, then fails here
+// instead of producing a SignerInfo that does not verify.
+func (algorithm cmsSignerAlgorithm) checkRSASignature(ee *x509.Certificate, data []byte, hash crypto.Hash, signature []byte) error {
+	publicKey, ok := ee.PublicKey.(*rsa.PublicKey)
+	if !ok {
+		return nil
+	}
+	// crypto/rsa refuses to verify with keys below 1024 bits, and below 2048
+	// bits in FIPS 140-only mode, while an external signer may still sign
+	// with them.
+	minimumBits := 1024
+	if fips140.Enforced() {
+		minimumBits = 2048
+	}
+	if publicKey.N.BitLen() < minimumBits {
+		return nil
+	}
+	h := hash.New()
+	h.Write(data)
+	digest := h.Sum(nil)
+	switch algorithm.mode {
+	case cmsSigningModeRSAPSS:
+		if err := rsa.VerifyPSS(publicKey, hash, digest, signature, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash}); err != nil {
+			return fmt.Errorf("pkcs7: signature does not verify as RSASSA-PSS with %s and a salt as long as its hash: %w", hash, err)
+		}
+	case cmsSigningModePreHashed:
+		if err := rsa.VerifyPKCS1v15(publicKey, hash, digest, signature); err != nil {
+			return fmt.Errorf("pkcs7: signature does not verify as PKCS #1 v1.5 with %s: %w", hash, err)
+		}
+	}
+	return nil
 }
 
 type dsaSignature struct {
