@@ -428,9 +428,10 @@ func (algorithm cmsSignerAlgorithm) sign(keyOrSigner interface{}, data []byte, d
 	case cmsSigningModeMLDSA:
 		return signer.Sign(rand.Reader, data, &mldsa.Options{})
 	default:
-		h := digestAlg.New()
-		h.Write(data)
-		return signer.Sign(rand.Reader, h.Sum(nil), digestAlg)
+		// crypto.SignMessage hands a crypto.MessageSigner the data itself and
+		// hashes it for any other signer, so a signer that hashes on its own
+		// (an HSM or remote signing service) does not sign a hash of the hash.
+		return crypto.SignMessage(signer, rand.Reader, data, digestAlg)
 	}
 }
 

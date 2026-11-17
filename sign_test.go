@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"crypto"
 	"crypto/dsa"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/asn1"
 	"encoding/pem"
+	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"os"
 	"os/exec"
@@ -507,4 +510,49 @@ func fromHex(s string) *big.Int {
 		panic(s)
 	}
 	return result
+}
+
+// messageOnlySigner signs only through SignMessage, as a remote signing
+// service that hashes the data itself does.
+type messageOnlySigner struct {
+	key *rsa.PrivateKey
+}
+
+func (s messageOnlySigner) Public() crypto.PublicKey { return s.key.Public() }
+
+func (s messageOnlySigner) Sign(io.Reader, []byte, crypto.SignerOpts) ([]byte, error) {
+	return nil, errors.New("Sign called with a digest, expected SignMessage")
+}
+
+func (s messageOnlySigner) SignMessage(rand io.Reader, msg []byte, opts crypto.SignerOpts) ([]byte, error) {
+	h := opts.HashFunc().New()
+	h.Write(msg)
+	return s.key.Sign(rand, h.Sum(nil), opts)
+}
+
+func TestSignHandsMessageSignerTheData(t *testing.T) {
+	cert, err := createTestCertificate(x509.SHA256WithRSA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	toBeSigned, err := NewSignedData([]byte("Hello World"))
+	if err != nil {
+		t.Fatalf("Cannot initialize signed data: %s", err)
+	}
+	toBeSigned.SetDigestAlgorithm(OIDDigestAlgorithmSHA256)
+	signer := messageOnlySigner{key: (*cert.PrivateKey).(*rsa.PrivateKey)}
+	if err := toBeSigned.AddSigner(cert.Certificate, signer, SignerInfoConfig{}); err != nil {
+		t.Fatalf("Cannot add signer: %s", err)
+	}
+	signed, err := toBeSigned.Finish()
+	if err != nil {
+		t.Fatalf("Cannot finish signing data: %s", err)
+	}
+	p7, err := Parse(signed)
+	if err != nil {
+		t.Fatalf("Cannot parse signed data: %v", err)
+	}
+	if err := p7.Verify(); err != nil {
+		t.Fatalf("Cannot verify signed data: %s", err)
+	}
 }
