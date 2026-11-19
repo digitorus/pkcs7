@@ -20,7 +20,7 @@ import (
 // requiring support for producing composite-signed X.509 certificates.
 // The certificate is a minimal test stand-in with a genuine DER-encoded SPKI.
 func TestCompositeVerify(t *testing.T) {
-	var idctTSTInfo = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 16, 1, 4}
+	idctTSTInfo := asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 16, 1, 4}
 
 	msg := []byte("Composite ML-DSA CMS verification")
 	rsaKeys := map[int]*rsa.PrivateKey{}
@@ -31,7 +31,7 @@ func TestCompositeVerify(t *testing.T) {
 				t.Fatal(err)
 			}
 			var tradKey []byte
-			var signer func([]byte) ([]byte, error)
+			var signer func(*testing.T, []byte) []byte
 			switch a.traditional {
 			case compositePSS, compositePKCS1:
 				key := rsaKeys[a.bits]
@@ -43,15 +43,23 @@ func TestCompositeVerify(t *testing.T) {
 					rsaKeys[a.bits] = key
 				}
 				tradKey = x509.MarshalPKCS1PublicKey(&key.PublicKey)
-				signer = func(rep []byte) ([]byte, error) {
+				signer = func(t *testing.T, rep []byte) []byte {
 					h := a.tradHash.New()
 					h.Write(rep)
 					digest := h.Sum(nil)
 					if a.traditional == compositePSS {
-						return rsa.SignPSS(rand.Reader, key, a.tradHash, digest,
+						bytes, err := rsa.SignPSS(rand.Reader, key, a.tradHash, digest,
 							&rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash})
+						if err != nil {
+							t.Fatal(err)
+						}
+						return bytes
 					}
-					return rsa.SignPKCS1v15(rand.Reader, key, a.tradHash, digest)
+					bytes, err := rsa.SignPKCS1v15(rand.Reader, key, a.tradHash, digest)
+					if err != nil {
+						t.Fatal(err)
+					}
+					return bytes
 				}
 
 			case compositeECDSA:
@@ -63,10 +71,14 @@ func TestCompositeVerify(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				signer = func(rep []byte) ([]byte, error) {
+				signer = func(t *testing.T, rep []byte) []byte {
 					h := a.tradHash.New()
 					h.Write(rep)
-					return ecdsa.SignASN1(rand.Reader, key, h.Sum(nil))
+					bytes, err := ecdsa.SignASN1(rand.Reader, key, h.Sum(nil))
+					if err != nil {
+						t.Fatal(err)
+					}
+					return bytes
 				}
 
 			case compositeEd25519:
@@ -75,8 +87,8 @@ func TestCompositeVerify(t *testing.T) {
 					t.Fatal(err)
 				}
 				tradKey = pub
-				signer = func(rep []byte) ([]byte, error) {
-					return ed25519.Sign(key, rep), nil
+				signer = func(_ *testing.T, rep []byte) []byte {
+					return ed25519.Sign(key, rep)
 				}
 
 			default:
@@ -109,8 +121,10 @@ func TestCompositeVerify(t *testing.T) {
 					name = "signed-attributes"
 				}
 				t.Run(name, func(t *testing.T) {
-					cms := &PKCS7{Content: append([]byte(nil), msg...), Certificates: []*x509.Certificate{cert},
-						raw: signedData{ContentInfo: contentInfo{ContentType: OIDData}}}
+					cms := &PKCS7{
+						Content: append([]byte(nil), msg...), Certificates: []*x509.Certificate{cert},
+						raw: signedData{ContentInfo: contentInfo{ContentType: OIDData}},
+					}
 					sign := signerInfo{
 						IssuerAndSerialNumber:     issuerAndSerial{IssuerName: asn1.RawValue{FullBytes: cert.RawIssuer}, SerialNumber: cert.SerialNumber},
 						DigestEncryptionAlgorithm: pkix.AlgorithmIdentifier{Algorithm: a.oid},
@@ -143,10 +157,7 @@ func TestCompositeVerify(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					tradSig, err := signer(rep)
-					if err != nil {
-						t.Fatal(err)
-					}
+					tradSig := signer(t, rep)
 					sign.EncryptedDigest = append(pqSig, tradSig...)
 					cms.Signers = []signerInfo{sign}
 					if err := cms.Verify(); err != nil {
@@ -343,10 +354,8 @@ func TestCompositeVerify(t *testing.T) {
 								bad := *cms
 								bad.Content = bytes.Clone(cms.Content)
 								bad.Signers = append([]signerInfo(nil), cms.Signers...)
-								bad.Signers[0].EncryptedDigest =
-									bytes.Clone(cms.Signers[0].EncryptedDigest)
-								bad.Signers[0].AuthenticatedAttributes =
-									append([]attribute(nil), cms.Signers[0].AuthenticatedAttributes...)
+								bad.Signers[0].EncryptedDigest = bytes.Clone(cms.Signers[0].EncryptedDigest)
+								bad.Signers[0].AuthenticatedAttributes = append([]attribute(nil), cms.Signers[0].AuthenticatedAttributes...)
 
 								tc.mutate(t, &bad)
 

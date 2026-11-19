@@ -25,7 +25,8 @@ func TestBouncyCastleCompositeInteroperability(t *testing.T) {
 	content := []byte("Bouncy Castle and Go agree on RFC 10073 / RFC 10082 composite CMS")
 	writeTestFile(t, contentPath, content)
 
-	args := []string{"composite-sign-batch", contentPath, dir}
+	args := make([]string, 0, 3+len(compositeAlgorithms))
+	args = append(args, "composite-sign-batch", contentPath, dir)
 	for _, algorithm := range compositeAlgorithms {
 		name := strings.TrimPrefix(algorithm.label, "COMPSIG-")
 		args = append(args, name)
