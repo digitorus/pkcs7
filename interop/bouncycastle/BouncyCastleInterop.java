@@ -1,5 +1,8 @@
+import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
 import java.security.KeyFactory;
 import java.security.PrivateKey;
 import java.security.Security;
@@ -8,8 +11,17 @@ import java.security.cert.X509Certificate;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Date;
+import java.time.Instant;
 
+import org.bouncycastle.asn1.ASN1Primitive;
+import org.bouncycastle.asn1.x500.X500Name;
+import org.bouncycastle.asn1.x509.BasicConstraints;
+import org.bouncycastle.asn1.x509.Extension;
+import org.bouncycastle.asn1.x509.KeyUsage;
+import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
 import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.cert.X509v3CertificateBuilder;
 import org.bouncycastle.cert.jcajce.JcaCertStore;
 import org.bouncycastle.cms.CMSProcessableByteArray;
 import org.bouncycastle.cms.CMSAlgorithm;
@@ -29,6 +41,7 @@ import org.bouncycastle.cms.jcajce.JcaSignerInfoGeneratorBuilder;
 import org.bouncycastle.cms.jcajce.JcaSimpleSignerInfoVerifierBuilder;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.operator.ContentSigner;
+import org.bouncycastle.util.CollectionStore;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
 
@@ -70,8 +83,106 @@ public final class BouncyCastleInterop {
                 }
                 decrypt(Path.of(args[1]), Path.of(args[2]), Path.of(args[3]), Path.of(args[4]));
                 break;
+            case "composite-sign":
+                if (args.length != 4) {
+                    throw new IllegalArgumentException("composite-sign requires algorithm, content, and output directory");
+                }
+                signComposite(args[1], Path.of(args[2]), Path.of(args[3]), generateCompositeIssuerKey(), BigInteger.valueOf(2));
+                break;
+            case "composite-sign-batch":
+                if (args.length < 4) {
+                    throw new IllegalArgumentException("composite-sign-batch requires content, output directory, and algorithms");
+                }
+                Path contentPath = Path.of(args[1]);
+                Path outputDir = Path.of(args[2]);
+                KeyPair issuerKey = generateCompositeIssuerKey();
+                for (int i = 3; i < args.length; i++) {
+                    String algorithm = args[i];
+                    signComposite(algorithm, contentPath, outputDir.resolve(algorithm), issuerKey, BigInteger.valueOf(i - 1));
+                }
+                break;
             default:
                 throw new IllegalArgumentException("unknown command: " + args[0]);
+        }
+    }
+
+    private static void signComposite(String algorithm, Path contentPath, Path outputDir, KeyPair issuerKey, BigInteger serial) throws Exception {
+        Files.createDirectories(outputDir);
+        byte[] content = Files.readAllBytes(contentPath);
+        
+        Instant now = Instant.now();
+        KeyPairGenerator compositeGenerator = KeyPairGenerator.getInstance(algorithm, PROVIDER);
+        KeyPair signerKey = compositeGenerator.generateKeyPair();
+        SubjectPublicKeyInfo signerSPKI = SubjectPublicKeyInfo.getInstance(
+            ASN1Primitive.fromByteArray(signerKey.getPublic().getEncoded()));
+
+        X509v3CertificateBuilder certificateBuilder = new X509v3CertificateBuilder(
+            new X500Name("CN=BC composite CMS test issuer"), serial,
+            Date.from(now.minusSeconds(24 * 60 * 60)),
+            Date.from(now.plusSeconds(365L * 24 * 60 * 60)),
+            new X500Name("CN=" + algorithm), signerSPKI);
+        certificateBuilder.addExtension(Extension.basicConstraints, true, new BasicConstraints(false));
+        certificateBuilder.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.digitalSignature));
+        ContentSigner issuerSigner = new JcaContentSignerBuilder("SHA256withRSA")
+            .setProvider(PROVIDER).build(issuerKey.getPrivate());
+        X509CertificateHolder signerCertificate = certificateBuilder.build(issuerSigner);
+
+        SubjectPublicKeyInfo issuerSPKI = SubjectPublicKeyInfo.getInstance(
+            ASN1Primitive.fromByteArray(issuerKey.getPublic().getEncoded())
+        );
+
+        X500Name issuerName = new X500Name("CN=BC composite CMS test issuer");
+        X509v3CertificateBuilder issuerBuilder = new X509v3CertificateBuilder(
+            issuerName,
+            BigInteger.valueOf(2),
+            Date.from(now.minusSeconds(24 * 60 * 60)),
+            Date.from(now.plusSeconds(365L * 24 * 60 * 60)),
+            issuerName,
+            issuerSPKI
+        );
+
+        issuerBuilder.addExtension(Extension.basicConstraints, true, new BasicConstraints(true));
+        issuerBuilder.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.keyCertSign | KeyUsage.cRLSign));
+
+        ContentSigner caSigner = new JcaContentSignerBuilder("SHA256withRSA")
+            .setProvider(PROVIDER)
+            .build(issuerKey.getPrivate());
+
+        X509CertificateHolder issuerCertificate = issuerBuilder.build(caSigner);
+
+        Files.write(outputDir.resolve("issuer.der"), issuerCertificate.getEncoded());
+
+        for (boolean detached : new boolean[]{false, true}) {
+            for (boolean direct : new boolean[]{false, true}) {
+                ContentSigner contentSigner = new JcaContentSignerBuilder(algorithm)
+                    .setProvider(PROVIDER).build(signerKey.getPrivate());
+                JcaSignerInfoGeneratorBuilder signerBuilder = new JcaSignerInfoGeneratorBuilder(
+                    new JcaDigestCalculatorProviderBuilder().setProvider(PROVIDER).build());
+                signerBuilder.setDirectSignature(direct);
+                CMSSignedDataGenerator generator = new CMSSignedDataGenerator();
+                generator.addSignerInfoGenerator(signerBuilder.build(contentSigner, signerCertificate));
+                generator.addCertificates(new CollectionStore<X509CertificateHolder>(
+                    Collections.singletonList(signerCertificate)));
+                CMSSignedData signedData = generator.generate(
+                    new CMSProcessableByteArray(content), !detached);
+                byte[] encoded = signedData.getEncoded();
+
+                CMSSignedData parsed = detached
+                    ? new CMSSignedData(new CMSProcessableByteArray(content), encoded)
+                    : new CMSSignedData(encoded);
+                if (parsed.getSignerInfos().size() != 1) {
+                    throw new IllegalStateException("expected one composite CMS signer");
+                }
+                SignerInformation signer = parsed.getSignerInfos().getSigners().iterator().next();
+                if (!signer.verify(new JcaSimpleSignerInfoVerifierBuilder()
+                        .setProvider(PROVIDER).build(signerCertificate))) {
+                    throw new IllegalStateException("BC composite self-check failed: " + algorithm);
+                }
+
+                String filename = (detached ? "detached" : "embedded")
+                    + "-" + (direct ? "direct" : "attributes") + ".der";
+                Files.write(outputDir.resolve(filename), encoded);
+            }
         }
     }
 
@@ -171,5 +282,11 @@ public final class BouncyCastleInterop {
     private static PrivateKey loadPrivateKey(Path keyPath, String algorithm) throws Exception {
         return KeyFactory.getInstance(algorithm, PROVIDER).generatePrivate(
             new PKCS8EncodedKeySpec(Files.readAllBytes(keyPath)));
+    }
+
+    private static KeyPair generateCompositeIssuerKey() throws Exception {
+        KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(2048);
+        return generator.generateKeyPair();
     }
 }
